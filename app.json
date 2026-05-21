@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "NOVIA",
+    "slug": "noviris",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/cat.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "runtimeVersion": "1.0.0",
+    "updates": {
+      "url": "https://u.expo.dev/928a233f-606a-412b-9b2a-6c9e57eba586"
+    },
+    "splash": {
+      "image": "./assets/cat2.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/cat.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "navigationBar": {
+        "backgroundColor": "#00000000",
+        "barStyle": "light"
+      },
+      "package": "com.iitznova.novia"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "928a233f-606a-412b-9b2a-6c9e57eba586"
+      }
+    }
+  }
+}

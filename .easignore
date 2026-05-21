@@ -1,0 +1,11 @@
+# Ignore local IDE settings and background lock files
+.vs/
+*.slnx
+*.suo
+*.user
+*.vsidx
+
+# Standard node and build ignores
+node_modules/
+.expo/
+dist/
