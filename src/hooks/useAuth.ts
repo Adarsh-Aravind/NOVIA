@@ -158,35 +158,14 @@ export function useAuth() {
     if (!session) return;
     try {
       setLoading(true);
-      
-      const { data: partnerProf, error: findErr } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', partnerUserId)
-        .maybeSingle();
 
-      if (findErr || !partnerProf) {
-        Alert.alert("Error", "Partner User ID not found. Check and try again.");
-        return;
-      }
+      // Pairing runs through a validated SECURITY DEFINER RPC so neither the
+      // couple row nor couple_id can be spoofed from the client.
+      const { error } = await supabase.rpc('pair_with_partner', {
+        partner_uuid: partnerUserId,
+      });
 
-      if (partnerProf.couple_id) {
-        Alert.alert("Error", "Partner is already paired with another account!");
-        return;
-      }
-
-      const { data: couple, error: coupleErr } = await supabase
-        .from('couples')
-        .insert({
-          user_1_id: session.user.id,
-          user_2_id: partnerUserId,
-        })
-        .select()
-        .single();
-
-      if (coupleErr || !couple) {
-        throw coupleErr || new Error("Failed to link couple pair");
-      }
+      if (error) throw error;
 
       Alert.alert("Success", "Successfully paired with your partner!");
       await bootstrapUser(session.user.id);
@@ -201,10 +180,7 @@ export function useAuth() {
     if (!coupleId) return;
     try {
       setLoading(true);
-      const { error } = await supabase
-        .from('couples')
-        .delete()
-        .eq('id', coupleId);
+      const { error } = await supabase.rpc('unpair');
 
       if (error) throw error;
       Alert.alert("Success", "Successfully unpaired.");

@@ -53,7 +53,7 @@ Whether it's syncing your wake-up alarms, tracking menstrual health cycles, shar
 *   **Styling & UI**: Vanilla React Native StyleSheet with high-fidelity `react-native-svg` atmospheric shaders and a custom fractal grain noise filter overlay
 *   **Local Storage**: `@react-native-async-storage/async-storage`
 *   **Icons**: `lucide-react-native`
-*   **Notification Engine**: `expo-notifications` (running background fetch routines via `expo-task-manager` and `expo-background-fetch`)
+*   **Alarm & Notification Engine**: `@notifee/react-native` for exact full-screen wake-up alarms, plus `expo-notifications` for reminders
 
 ---
 

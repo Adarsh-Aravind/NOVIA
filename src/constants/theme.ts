@@ -34,10 +34,10 @@ export const THEME = {
     xl: 32
   },
   borderRadius: {
-    sm: 4,
-    md: 8,
-    lg: 12,
-    xl: 20,
+    sm: 10,
+    md: 16,
+    lg: 22,
+    xl: 28,
     round: 9999
   }
 };

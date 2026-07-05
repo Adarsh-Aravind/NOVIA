@@ -1,5 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
+  setupAlarmChannel,
+  requestAlarmPermissions,
+  registerAlarmForegroundHandler,
+  syncCoupleAlarms,
+  stopRingingAlarm,
+  promptExactAlarmPermission,
+  getActiveRingingAlarmId,
+} from './src/services/alarmService';
+import {
   StyleSheet,
   Text,
   View,
@@ -20,7 +29,7 @@ import {
   Image
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
-import { Menu, Settings as SettingsIcon, LogOut, X, User, Heart } from 'lucide-react-native';
+import { Menu, Settings as SettingsIcon, LogOut, X, User, Heart, Check, Square, CheckSquare } from 'lucide-react-native';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, RadialGradient, Rect, Stop, Filter, FeTurbulence, FeColorMatrix, FeComposite } from 'react-native-svg';
 import * as Notifications from 'expo-notifications';
 import { Alarm, Reminder } from './src/types';
@@ -30,13 +39,15 @@ import { useMood } from './src/hooks/useMood';
 import { useAlarms } from './src/hooks/useAlarms';
 import { usePeriods } from './src/hooks/usePeriods';
 import { useReminders } from './src/hooks/useReminders';
+import { useLocation } from './src/hooks/useLocation';
+import { formatDistance, formatUpdatedAgo, haversineMeters, mapsUrl } from './src/services/locationService';
 import { configureNotificationsAsync, getAlarmChannelDndBypassGranted } from './src/services/notification';
 import { cancelScheduledNotificationsByPrefix, scheduleSharedReminder, scheduleLocalNotification } from './src/services/notification';
-import { registerBackgroundFetchAsync } from './src/services/backgroundTasks';
 import { supabase } from './src/services/supabase';
+import { checkAndApplyUpdate } from './src/services/updates';
+import notifee from '@notifee/react-native';
 import { FIRST_AID_DATA } from './src/constants/firstAidData';
 import { THEME } from './src/constants/theme';
-import { validateBloodPressure, validateBloodSugar } from './src/utils/validators';
 
 const DAY_OPTIONS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
@@ -119,8 +130,13 @@ const BlinkingBucketRow = ({ item, getCreatorName, onToggle, onDelete }: { item:
       >
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, paddingRight: 8 }}>
-            <Text style={[styles.bucketText, item.is_completed && styles.strikethrough]}>
-              {item.is_completed ? '✅' : '⬜'} {item.title}
+            {item.is_completed ? (
+              <CheckSquare size={18} color="#F18F2E" strokeWidth={2} />
+            ) : (
+              <Square size={18} color="rgba(255,255,255,0.5)" strokeWidth={2} />
+            )}
+            <Text style={[styles.bucketText, item.is_completed && styles.strikethrough, { marginLeft: 8 }]}>
+              {item.title}
             </Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -141,7 +157,7 @@ const BlinkingBucketRow = ({ item, getCreatorName, onToggle, onDelete }: { item:
                 borderColor: 'rgba(255, 75, 75, 0.3)',
               }}
             >
-              <Text style={{ color: '#FF4D4D', fontSize: 10, fontWeight: 'bold' }}>✕</Text>
+              <X size={12} color="#FF4D4D" strokeWidth={2.5} />
             </TouchableOpacity>
           </View>
         </View>
@@ -156,7 +172,7 @@ const BlinkingBucketRow = ({ item, getCreatorName, onToggle, onDelete }: { item:
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'hub' | 'notes' | 'alarms' | 'finances' | 'health' | 'bucket'>('hub');
+  const [activeTab, setActiveTab] = useState<'hub' | 'notes' | 'alarms' | 'finances' | 'health' | 'bucket' | 'location'>('hub');
   const [isDndBypassGranted, setIsDndBypassGranted] = useState(false);
 
   const checkDndBypass = async () => {
@@ -219,11 +235,26 @@ export default function App() {
 
   const { notes, isPartnerTyping, addNote, removeNote } = useRealtimeNotes(coupleId, userId);
   const { currentMood, partnerMood, partnerName, updateMood } = useMood(coupleId, userId);
-  const { alarms, activePunishments, addAlarm, deleteAlarm, toggleAlarm, triggerAlarmSnooze, dismissAlarm, resolvePunishment, userKey } = useAlarms(coupleId, userId);
+  const { alarms, activePunishments, addAlarm, deleteAlarm, toggleAlarm, triggerAlarmSnooze, dismissAlarm, resolvePunishment, userKey, alarmsBlocked } = useAlarms(coupleId, userId);
   const { records, predictions, addPeriodLog, refreshPeriods } = usePeriods(coupleId);
   const { reminders, addReminder, toggleReminder, deleteReminder } = useReminders(coupleId, userId);
+  const {
+    myLocation,
+    partnerLocation,
+    busy: locationBusy,
+    isLive: isLiveSharing,
+    errorMessage: locationError,
+    shareOnce: shareMyLocation,
+    setLive: setLiveSharing,
+    stopSharing: stopLocationSharing,
+  } = useLocation(coupleId, userId);
   const welcomeAnim = useRef(new Animated.Value(0)).current;
-  const glowAnim = useRef(new Animated.Value(0.35)).current;
+  const alarmsRef = useRef(alarms);
+  alarmsRef.current = alarms;
+  // Only nag about un-armed alarms once per app session.
+  const alarmBlockPromptedRef = useRef(false);
+  const remindersRef = useRef(reminders);
+  remindersRef.current = reminders;
 
   // Side drawer & settings states
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -270,7 +301,7 @@ export default function App() {
 
   const handleUnpairPress = () => {
     Alert.alert(
-      "⚠️ Unpair Partner?",
+      "Unpair Partner?",
       "This will break the live synchronized channel. Are you sure you want to proceed?",
       [
         { text: "Cancel", style: "cancel" },
@@ -318,6 +349,9 @@ export default function App() {
   const [ringingAlarm, setRingingAlarm] = useState<Alarm | null>(null);
   const [ringingReminder, setRingingReminder] = useState<Reminder | null>(null);
   const lastRungTimeRef = useRef<string | null>(null);
+  // Alarm id captured from a cold launch (app opened by tapping the alarm),
+  // resolved to the branded ringing screen once the alarm list has loaded.
+  const [pendingAlarmId, setPendingAlarmId] = useState<string | null>(null);
 
   const handleIncomingRingingKey = (key: string) => {
     if (!coupleId) return;
@@ -357,54 +391,10 @@ export default function App() {
     };
   }, [alarms, reminders, coupleId]);
 
-  useEffect(() => {
-    if (!session || !coupleId || !userId) return;
-
-    const interval = setInterval(() => {
-      const now = new Date();
-      const currentHour = now.getHours();
-      const currentMinute = now.getMinutes();
-      const currentDay = now.getDay();
-      
-      const hhmm = `${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}`;
-      const timeKey = `${hhmm}:${now.toLocaleDateString()}`;
-
-      // A. Check Alarms
-      if (alarms.length > 0 && !ringingAlarm) {
-        alarms.forEach((alarm) => {
-          if (!alarm.is_enabled) return;
-          const [aHour, aMinute] = alarm.alarm_time.split(':').map(Number);
-          if (aHour === currentHour && aMinute === currentMinute) {
-            const activeDays = alarm.days_active && alarm.days_active.length > 0 ? alarm.days_active : [0, 1, 2, 3, 4, 5, 6];
-            if (activeDays.includes(currentDay)) {
-              const myStatus = userKey === 1 ? alarm.user_1_status : alarm.user_2_status;
-              if (myStatus !== 'dismissed' && myStatus !== 'snoozed' && lastRungTimeRef.current !== `alarm:${alarm.id}:${timeKey}`) {
-                setRingingAlarm(alarm);
-              }
-            }
-          }
-        });
-      }
-
-      // B. Check Routine Reminders
-      if (reminders.length > 0 && !ringingReminder) {
-        reminders.forEach((rem) => {
-          if (rem.is_completed) return;
-          const meta = rem.metadata as any;
-          if (meta?.has_alarm && meta?.alarm_time) {
-            const [rHour, rMinute] = meta.alarm_time.split(':').map(Number);
-            if (rHour === currentHour && rMinute === currentMinute) {
-              if (lastRungTimeRef.current !== `reminder:${rem.id}:${timeKey}`) {
-                setRingingReminder(rem);
-              }
-            }
-          }
-        });
-      }
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [alarms, reminders, coupleId, userId, userKey, ringingAlarm, ringingReminder]);
+  // NOTE: The old 5-second setInterval clock poll was removed for battery.
+  // Wake-up alarms now fire via notifee OS-level triggers (foreground handler
+  // surfaces the in-app modal), and routine reminders surface via the
+  // expo-notifications received/response listeners above.
 
   const handleSnoozeAlarm = async () => {
     if (!ringingAlarm || !userKey) return;
@@ -412,7 +402,9 @@ export default function App() {
     const now = new Date();
     const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     lastRungTimeRef.current = `alarm:${alarmId}:${hhmm}:${now.toLocaleDateString()}`;
-    
+
+    // Silence the notifee alarm that surfaced this modal, then snooze in DB.
+    await stopRingingAlarm().catch(() => {});
     setRingingAlarm(null);
     await triggerAlarmSnooze(alarmId, userKey);
   };
@@ -424,6 +416,8 @@ export default function App() {
     const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     lastRungTimeRef.current = `alarm:${alarmId}:${hhmm}:${now.toLocaleDateString()}`;
 
+    // Silence the notifee alarm that surfaced this modal, then dismiss in DB.
+    await stopRingingAlarm().catch(() => {});
     setRingingAlarm(null);
     await dismissAlarm(alarmId, userKey);
   };
@@ -491,8 +485,6 @@ export default function App() {
   };
 
   // Medical Record Vault
-  const [bpSystolic, setBpSystolic] = useState('');
-  const [bpDiastolic, setBpDiastolic] = useState('');
   const [medLogs, setMedLogs] = useState<any[]>([]);
   const [hospitalDate, setHospitalDate] = useState('');
   const [hospitalReason, setHospitalReason] = useState('');
@@ -526,15 +518,85 @@ export default function App() {
       configureNotificationsAsync().then(() => {
         checkDndBypass();
       });
-      registerBackgroundFetchAsync();
+      // Prepare the high-priority notifee alarm channel + request exact-alarm /
+      // full-screen-intent permissions used by the reliable wake-up alarms.
+      setupAlarmChannel();
+      requestAlarmPermissions();
     }
   }, [session]);
+
+  // If we tried to schedule alarms but the OS armed none of them (permission
+  // revoked, or the app was killed/optimised), tell the user once and offer the
+  // fix rather than letting the alarm silently never ring.
+  useEffect(() => {
+    if (!alarmsBlocked || alarmBlockPromptedRef.current) return;
+    alarmBlockPromptedRef.current = true;
+    Alert.alert(
+      'Alarms may not ring',
+      'Your alarms are saved, but Android would not arm them. This is usually the "Alarms & reminders" permission or battery optimisation blocking NOVIA.',
+      [
+        { text: 'Dismiss', style: 'cancel' },
+        { text: 'Fix now', onPress: () => promptExactAlarmPermission() },
+      ],
+    );
+  }, [alarmsBlocked]);
+
+  // Run once on launch: apply any OTA update, register the notifee foreground
+  // handler (shows the branded ringing screen while the app is open), and check
+  // whether the app was cold-launched by tapping an alarm's full-screen intent.
+  useEffect(() => {
+    checkAndApplyUpdate();
+
+    const unsubscribe = registerAlarmForegroundHandler((alarmId) => {
+      const matched = alarmsRef.current.find((a) => a.id === alarmId);
+      if (matched && matched.is_enabled) {
+        setRingingAlarm(matched);
+      } else if (alarmId) {
+        setPendingAlarmId(alarmId);
+      }
+    });
+
+    notifee.getInitialNotification().then((initial) => {
+      const data = initial?.notification?.data;
+      if (data?.kind === 'alarm' && typeof data.alarmId === 'string') {
+        setPendingAlarmId(data.alarmId);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  // Once alarms are loaded, resolve a pending (cold-launch) alarm to the
+  // branded ringing screen with its reason/purpose.
+  useEffect(() => {
+    if (!pendingAlarmId) return;
+    const matched = alarms.find((a) => a.id === pendingAlarmId);
+    if (matched && matched.is_enabled) {
+      setRingingAlarm(matched);
+      setPendingAlarmId(null);
+    }
+  }, [pendingAlarmId, alarms]);
 
   useEffect(() => {
     checkDndBypass();
     const subscription = AppState.addEventListener('change', (nextAppState) => {
       if (nextAppState === 'active') {
         checkDndBypass();
+        // Roll the alarm scheduling window forward each time the app is opened.
+        syncCoupleAlarms(alarmsRef.current).catch((e) =>
+          console.error('[Alarms] Foreground re-sync failed:', e),
+        );
+        // If the app was brought to the front by a ringing alarm's full-screen
+        // intent (warm resume from the lock screen), getInitialNotification
+        // won't fire — read the still-displayed alarm notification and surface
+        // the branded ringing screen ourselves.
+        getActiveRingingAlarmId()
+          .then((alarmId) => {
+            if (alarmId) setPendingAlarmId(alarmId);
+          })
+          .catch(() => {});
       }
     });
     return () => {
@@ -560,27 +622,6 @@ export default function App() {
     }).start();
   }, [session, coupleId, welcomeAnim]);
 
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(glowAnim, {
-          toValue: 0.95,
-          duration: 2500,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(glowAnim, {
-          toValue: 0.35,
-          duration: 2500,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [glowAnim]);
-
   const prevPunishmentsRef = useRef<any[]>([]);
 
   useEffect(() => {
@@ -597,7 +638,7 @@ export default function App() {
 
     newlyAdded.forEach(newPunishment => {
       const isOffender = newPunishment.offender_id === userId;
-      const penaltyTitle = isOffender ? "🚨 PUNISHMENT ASSIGNED" : "🚨 PARTNER PENALIZED";
+      const penaltyTitle = isOffender ? "PUNISHMENT ASSIGNED" : "PARTNER PENALIZED";
       const offenderName = isOffender ? "You" : (partnerProfile?.display_name || partnerName || "Your partner");
       const penaltyMsg = isOffender 
         ? `You have been assigned a punishment!\n\nPenalty: ${newPunishment.penalty_type.toUpperCase()}\nDescription: ${newPunishment.description}`
@@ -775,14 +816,14 @@ export default function App() {
             if (isNaN(hour) || isNaN(minute)) return null;
 
             return scheduleLocalNotification({
-              title: `⏰ ROUTINE: ${rem.title.toUpperCase()}`,
-              body: `It's time for your daily routine reminder! Don't forget to cross it off. ✨`,
+              title: `ROUTINE: ${rem.title.toUpperCase()}`,
+              body: `It's time for your daily routine reminder. Don't forget to cross it off.`,
               trigger: {
                 hour,
                 minute,
                 repeats: true,
               } as any,
-              channelId: 'alarm-channel', // High priority channel
+              channelId: 'alarm-channel-v2', // High priority channel
               data: {
                 reminderKey: `reminder-alarm:${coupleId}:${rem.id}`
               }
@@ -902,7 +943,7 @@ export default function App() {
             if (error) {
               Alert.alert("Settle Up failed", error.message);
             } else {
-              Alert.alert("🎉 Settled Up!", "All outstanding borrowings have been marked as paid.");
+              Alert.alert("Settled Up", "All outstanding borrowings have been marked as paid.");
               await fetchSharedFinances();
             }
           }
@@ -939,47 +980,6 @@ export default function App() {
     await fetchSharedBucketList();
   };
 
-  // Toggle completion of bucket lists with custom animation alert
-  const toggleBucketItem = (id: string) => {
-    setBucketList(prev =>
-      prev.map(item => {
-        if (item.id === id) {
-          const nextState = !item.is_completed;
-          if (nextState) {
-            Alert.alert(
-              "🎉 Experiences Unlocked!",
-              "Congratulations on crossing off an experience together! Particle celebration active across screens.",
-              [{ text: "Awesome!" }]
-            );
-          }
-          return { ...item, is_completed: nextState };
-        }
-        return item;
-      })
-    );
-  };
-
-  // Add blood pressure log
-  const logBloodPressure = () => {
-    const check = validateBloodPressure(bpSystolic, bpDiastolic);
-    if (!check.valid) {
-      Alert.alert("Input Invalid", check.error);
-      return;
-    }
-    setMedLogs(prev => [
-      ...prev,
-      {
-        id: Math.random().toString(),
-        type: 'blood_pressure',
-        value: `${bpSystolic}/${bpDiastolic} mmHg`,
-        date: new Date().toLocaleDateString()
-      }
-    ]);
-    setBpSystolic('');
-    setBpDiastolic('');
-    Alert.alert("Success", "Blood pressure logged in medical vault.");
-  };
-
   const toggleBucketItemShared = async (item: any) => {
     const nextState = !item.is_completed;
     
@@ -988,7 +988,7 @@ export default function App() {
 
     if (nextState) {
       Alert.alert(
-        "🎉 Experiences Unlocked!",
+        "Experiences Unlocked",
         "Congratulations on crossing off an experience together! Particle celebration active across screens.",
         [{ text: "Awesome!" }]
       );
@@ -1146,15 +1146,15 @@ export default function App() {
     const partnerNameVal = partnerProfile?.display_name || partnerName || 'your partner';
     switch (partnerMood) {
       case 'Happy':
-        return `🎉 ${partnerNameVal} is feeling Happy today! Plan a sweet dessert date, share a high-energy activity, or celebrate this vibe together!`;
+        return `${partnerNameVal} is feeling Happy today. Plan a sweet dessert date, share a high-energy activity, or celebrate this vibe together.`;
       case 'Overwhelmed':
-        return `🧡 ${partnerNameVal} is feeling Overwhelmed. Take care of any pending chores, keep your communication extremely soft, and defer deep or stressful debates for later.`;
+        return `${partnerNameVal} is feeling Overwhelmed. Take care of any pending chores, keep your communication extremely soft, and defer deep or stressful debates for later.`;
       case 'Exhausted':
-        return `💆‍♂️ ${partnerNameVal} is Exhausted. Create a cozy, quiet sanctuary at home, offer a soothing warm beverage, and keep the environment restful.`;
+        return `${partnerNameVal} is Exhausted. Create a cozy, quiet sanctuary at home, offer a soothing warm beverage, and keep the environment restful.`;
       case 'Low Energy':
-        return `🌱 ${partnerNameVal} has Low Energy. Gentle cuddles, warm physical presence, and check-in without placing demands will make them feel loved.`;
+        return `${partnerNameVal} has Low Energy. Gentle cuddles, warm physical presence, and check-in without placing demands will make them feel loved.`;
       default:
-        return `✨ ${partnerNameVal} is feeling balanced. Send a cute meme, check in with a thoughtful text, or plan a tiny shared moment.`;
+        return `${partnerNameVal} is feeling balanced. Send a cute meme, check in with a thoughtful text, or plan a tiny shared moment.`;
     }
   })();
 
@@ -1163,7 +1163,7 @@ export default function App() {
       return {
         phase: datePredictions?.currentPhase || 'Unknown',
         color: '#FF6B00',
-        badge: '🌸 Neutral Phase',
+        badge: 'Neutral Phase',
         forecast: 'No active physical symptoms logged yet. Keeping standard track!',
         tips: 'Plan a cozy checking-in date, ask her how her day is going, and send a cute message!'
       };
@@ -1179,7 +1179,7 @@ export default function App() {
     const energy = symptoms.find((s: string) => s.startsWith('energy:'))?.split(':')[1] || 'normal';
 
     let phase = datePredictions?.currentPhase || 'Unknown';
-    let badge = '🌸 Follicular Phase';
+    let badge = 'Follicular Phase';
     let color = '#44D7B6'; // tealish green
     let forecast = '';
     let tips = '';
@@ -1187,11 +1187,11 @@ export default function App() {
     // Rule engine for phase determination based on questionnaire
     if (bleeding !== 'none') {
       phase = 'Menstruation';
-      badge = '🩸 Menstruation (Bleeding)';
+      badge = 'Menstruation (Bleeding)';
       color = '#FF4D4D'; // soft red
     } else if (fluid === 'eggwhite') {
       phase = 'Ovulation';
-      badge = '🥚 Ovulation (High Fertility)';
+      badge = 'Ovulation (High Fertility)';
       color = '#FF9F43'; // peach orange
     } else if (
       physical === 'cramps' || 
@@ -1203,11 +1203,11 @@ export default function App() {
       energy === 'low'
     ) {
       phase = 'Luteal';
-      badge = '🌙 Luteal Phase (PMS)';
+      badge = 'Luteal Phase (PMS)';
       color = '#9B5DE5'; // purple
     } else {
       phase = 'Follicular';
-      badge = '🌸 Follicular (Rising Energy)';
+      badge = 'Follicular (Rising Energy)';
       color = '#44D7B6';
     }
 
@@ -1225,11 +1225,11 @@ export default function App() {
         forecast += `Energy is feeling relatively ${energy}.`;
       }
 
-      tips = `1. ☕ Prepare a warm hot-water bottle or heating pad for her lower abdomen.
-2. 🍵 Brew her favorite hot tea (chamomile or peppermint is wonderful for cramps).
-3. 🍫 Bring her favorite chocolates, comfort snacks, or prepare a cozy movie night.
-4. 💆 Offer a gentle back rub or lower leg massage to ease discomfort.
-5. 🤫 Handle house chores proactively. Let her rest without any guilt.`;
+      tips = `1. Prepare a warm hot-water bottle or heating pad for her lower abdomen.
+2. Brew her favorite hot tea (chamomile or peppermint is wonderful for cramps).
+3. Bring her favorite chocolates, comfort snacks, or prepare a cozy movie night.
+4. Offer a gentle back rub or lower leg massage to ease discomfort.
+5. Handle house chores proactively. Let her rest without any guilt.`;
     } else if (phase === 'Ovulation') {
       forecast = `Cervical fluid is egg-white/fertile, showing peak estrogen and LH surge. Biological fertility is at its highest. `;
       if (physical === 'energized') {
@@ -1239,10 +1239,10 @@ export default function App() {
         forecast += `Feeling emotionally upbeat and highly connected.`;
       }
 
-      tips = `1. 🕯️ Plan a cute romantic date night! Excellent time for going out, dinner, or social events.
-2. 💐 Compliment her aesthetics and express your love. Confidence is highly resonant right now!
-3. 📸 Take photos together; capture this vibrant phase.
-4. 💬 Schedule some quality couple communication time to dream and connect deeply.`;
+      tips = `1. Plan a cute romantic date night. Excellent time for going out, dinner, or social events.
+2. Compliment her aesthetics and express your love. Confidence is highly resonant right now.
+3. Take photos together; capture this vibrant phase.
+4. Schedule some quality couple communication time to dream and connect deeply.`;
     } else if (phase === 'Luteal') {
       forecast = `Progesterone is dominant. Estrogen is dropping. `;
       if (physical === 'cramps' || physical === 'bloating') {
@@ -1255,11 +1255,11 @@ export default function App() {
         forecast += `Energy is lower, feeling tired or easily stressed.`;
       }
 
-      tips = `1. 🤍 Give her extra grace and absolute patience. Avoid debating or logical problem-solving.
-2. 🛋️ Create a quiet, cozy sanctuary at home. Soft lighting, calm vibe.
-3. 👂 Listen intently, hold her hand, and reassure her of your presence. "I am here, you are safe."
-4. 🧁 Fetch her comfort desserts or small sweet gestures without being asked.
-5. 🧼 Proactively keep things tidy to minimize sensory overload.`;
+      tips = `1. Give her extra grace and absolute patience. Avoid debating or logical problem-solving.
+2. Create a quiet, cozy sanctuary at home. Soft lighting, calm vibe.
+3. Listen intently, hold her hand, and reassure her of your presence. "I am here, you are safe."
+4. Fetch her comfort desserts or small sweet gestures without being asked.
+5. Proactively keep things tidy to minimize sensory overload.`;
     } else {
       // Follicular
       forecast = `Estrogen is gradually rising, prepping new follicles. Standard recovery phase. `;
@@ -1269,10 +1269,10 @@ export default function App() {
         forecast += `Estrogen levels are supporting a gradual rebound of physical and emotional balance.`;
       }
 
-      tips = `1. 🏃 Plan a light outdoor activity, walk in the park, or trying something fresh!
-2. 💌 Talk about your weekly goals and support each other.
-3. ☕ Surprise her with her favorite coffee/tea to start the day.
-4. 🌟 Help her with any creative or active project she's excited to start.`;
+      tips = `1. Plan a light outdoor activity, walk in the park, or try something fresh.
+2. Talk about your weekly goals and support each other.
+3. Surprise her with her favorite coffee/tea to start the day.
+4. Help her with any creative or active project she's excited to start.`;
     }
 
     return { phase, badge, color, forecast, tips };
@@ -1423,7 +1423,7 @@ export default function App() {
           {hasVisualRestriction ? (
             <SafeAreaView style={{ flex: 1 }}>
             <View style={styles.punishmentOverlay}>
-              <Text style={styles.punishTitle}>⚠️ ACCESS SUSPENDED</Text>
+              <Text style={styles.punishTitle}>ACCESS SUSPENDED</Text>
               <Text style={styles.punishDescription}>
                 You have skipped alarm wakes or missed loan repayments. The automated discipline engine has locked your client panel.
               </Text>
@@ -1488,7 +1488,7 @@ export default function App() {
                       ]}
                     >
                       <Text style={styles.welcomeTitle}>Hi {welcomeName}</Text>
-                      <Text style={styles.welcomeSubtitle}>Welcome back 👋</Text>
+                      <Text style={styles.welcomeSubtitle}>Welcome back</Text>
                     </Animated.View>
 
                     {/* Companion Status Row */}
@@ -1558,6 +1558,108 @@ export default function App() {
                       ) : firstAidSearch ? (
                         <Text style={styles.noMatchText}>No direct match found. Try typing 'blood pressure' or 'sugar'.</Text>
                       ) : null}
+                    </View>
+                  </View>
+                )}
+
+                {/* Location Sharing Tab */}
+                {activeTab === 'location' && (
+                  <View style={styles.tabContent}>
+                    {/* Partner's shared location */}
+                    <View style={styles.sectionCard}>
+                      <Text style={styles.sectionHeading}>
+                        {(partnerProfile?.display_name || partnerName || 'PARTNER').toUpperCase()}'S LOCATION
+                      </Text>
+                      {partnerLocation ? (
+                        <>
+                          <Text style={styles.locationPlace}>
+                            {partnerLocation.place_label || 'Location shared'}
+                          </Text>
+                          <Text style={styles.locationCoords}>
+                            {partnerLocation.latitude.toFixed(5)}, {partnerLocation.longitude.toFixed(5)}
+                          </Text>
+                          <Text style={styles.locationMeta}>
+                            Updated {formatUpdatedAgo(partnerLocation.updated_at)}
+                            {partnerLocation.accuracy ? ` · ±${Math.round(partnerLocation.accuracy)} m` : ''}
+                          </Text>
+                          {myLocation ? (
+                            <Text style={styles.locationDistance}>
+                              {formatDistance(haversineMeters(myLocation, partnerLocation))} away
+                            </Text>
+                          ) : null}
+                          <TouchableOpacity
+                            style={styles.primaryButton}
+                            onPress={() =>
+                              Linking.openURL(
+                                mapsUrl(
+                                  partnerLocation.latitude,
+                                  partnerLocation.longitude,
+                                  partnerLocation.place_label
+                                )
+                              )
+                            }
+                          >
+                            <Text style={styles.primaryBtnText}>Open in Maps</Text>
+                          </TouchableOpacity>
+                        </>
+                      ) : (
+                        <Text style={styles.welcomeCopy}>
+                          {(partnerProfile?.display_name || partnerName || 'Your partner')} isn't sharing their
+                          location right now. Ask them to open the Location tab and tap “Share my location”.
+                        </Text>
+                      )}
+                    </View>
+
+                    {/* My sharing controls */}
+                    <View style={styles.sectionCard}>
+                      <Text style={styles.sectionHeading}>MY LOCATION</Text>
+                      {myLocation ? (
+                        <Text style={styles.locationMeta}>
+                          Shared {formatUpdatedAgo(myLocation.updated_at)}
+                          {isLiveSharing ? ' · live' : ''}
+                        </Text>
+                      ) : (
+                        <Text style={styles.welcomeCopy}>
+                          You're not sharing your location. Your partner can only see it after you choose to share.
+                        </Text>
+                      )}
+
+                      {locationError ? (
+                        <Text style={styles.locationErrorText}>{locationError}</Text>
+                      ) : null}
+
+                      <TouchableOpacity
+                        style={[styles.primaryButton, locationBusy && { opacity: 0.6 }]}
+                        onPress={shareMyLocation}
+                        disabled={locationBusy}
+                      >
+                        {locationBusy ? (
+                          <ActivityIndicator color="#FFFFFF" />
+                        ) : (
+                          <Text style={styles.primaryBtnText}>
+                            {myLocation ? 'Update my location' : 'Share my location'}
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.locationSecondaryBtn}
+                        onPress={() => setLiveSharing(!isLiveSharing)}
+                      >
+                        <Text style={styles.locationSecondaryBtnText}>
+                          {isLiveSharing ? 'Stop live sharing' : 'Share live while app is open'}
+                        </Text>
+                      </TouchableOpacity>
+
+                      {myLocation ? (
+                        <TouchableOpacity style={styles.locationStopBtn} onPress={stopLocationSharing}>
+                          <Text style={styles.locationStopBtnText}>Stop sharing &amp; remove my location</Text>
+                        </TouchableOpacity>
+                      ) : null}
+
+                      <Text style={styles.locationHint}>
+                        NOVIA never tracks you in the background — your location updates only while this screen is open.
+                      </Text>
                     </View>
                   </View>
                 )}
@@ -1775,9 +1877,9 @@ export default function App() {
                       <View style={styles.chipsRow}>
                         <TouchableOpacity 
                           style={styles.quickAddChip} 
-                          onPress={() => addReminder('Face Care 🧴', 'face_care', 'daily')}
+                          onPress={() => addReminder('Face Care', 'face_care', 'daily')}
                         >
-                          <Text style={styles.quickAddChipText}>+ Face Care 🧴</Text>
+                          <Text style={styles.quickAddChipText}>+ Face Care</Text>
                         </TouchableOpacity>
                       </View>
 
@@ -1810,7 +1912,7 @@ export default function App() {
                       {/* Routine Alarm Configurator */}
                       <View style={{ marginVertical: 12 }}>
                         <View style={[styles.rowBetween, { marginBottom: 8 }]}>
-                          <Text style={styles.inputLabel}>SET DAILY ALARM TIME ⏰</Text>
+                          <Text style={styles.inputLabel}>SET DAILY ALARM TIME</Text>
                           <TouchableOpacity 
                             activeOpacity={0.8} 
                             onPress={() => setReminderHasAlarm(!reminderHasAlarm)} 
@@ -1871,7 +1973,7 @@ export default function App() {
                       {/* Reminders List */}
                       <View style={styles.remindersList}>
                         {reminders.length === 0 ? (
-                          <Text style={styles.noRemindersText}>All caught up! Tap a chip above to add a routine. ✨</Text>
+                          <Text style={styles.noRemindersText}>All caught up. Tap a chip above to add a routine.</Text>
                         ) : (
                           reminders.map((reminder) => {
                             const meta = reminder.metadata as any;
@@ -1881,7 +1983,7 @@ export default function App() {
                                   style={[styles.reminderCheckbox, reminder.is_completed && styles.reminderCheckboxCompleted]}
                                   onPress={() => toggleReminder(reminder.id, !reminder.is_completed)}
                                 >
-                                  {reminder.is_completed && <Text style={styles.checkMark}>✓</Text>}
+                                  {reminder.is_completed && <Check size={13} color="#FFFFFF" strokeWidth={3} />}
                                 </TouchableOpacity>
                                 <Text 
                                   style={[
@@ -1892,7 +1994,7 @@ export default function App() {
                                   {reminder.title}
                                   {meta?.has_alarm && meta?.alarm_time ? (
                                     <Text style={{ color: '#FF6B00', fontWeight: 'bold', fontSize: 11 }}>
-                                      {` ⏰ ${meta.alarm_time}`}
+                                      {`  ·  ${meta.alarm_time}`}
                                     </Text>
                                   ) : null}
                                 </Text>
@@ -1900,7 +2002,7 @@ export default function App() {
                                   style={styles.reminderDeleteButton}
                                   onPress={() => deleteReminder(reminder.id)}
                                 >
-                                  <Text style={styles.reminderDeleteText}>✕</Text>
+                                  <X size={13} color="#E74627" strokeWidth={2.5} />
                                 </TouchableOpacity>
                               </View>
                             );
@@ -1910,7 +2012,7 @@ export default function App() {
                     </View>{/* Device-Specific DND & Wake-Up Optimization Guide */}
                     {Platform.OS === 'android' && !isDndBypassGranted && (
                       <View style={[styles.sectionCard, { marginBottom: 20 }]}>
-                        <Text style={styles.sectionHeading}>🔋 DEVICE OPTIMIZATION (SAMSUNG &amp; VIVO)</Text>
+                        <Text style={styles.sectionHeading}>DEVICE OPTIMIZATION (SAMSUNG &amp; VIVO)</Text>
                         <Text style={[styles.alarmHeaderSub, { marginBottom: 12, color: '#A9A09A' }]}>
                           Samsung S23 (One UI) &amp; Vivo Y35 (Funtouch OS) require specific configurations to guarantee alarms ring and bypass Do Not Disturb (DND) mode.
                         </Text>
@@ -1918,7 +2020,7 @@ export default function App() {
                         <View style={{ gap: 12 }}>
                           {/* Samsung Section */}
                           <View style={{ backgroundColor: 'rgba(255, 255, 255, 0.03)', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255, 107, 0, 0.15)' }}>
-                            <Text style={{ color: '#FF6B00', fontWeight: 'bold', fontSize: 13, marginBottom: 4 }}>📱 Samsung S23 (One UI 5.x/6.x)</Text>
+                            <Text style={{ color: '#FF6B00', fontWeight: 'bold', fontSize: 13, marginBottom: 4 }}>Samsung S23 (One UI 5.x/6.x)</Text>
                             <Text style={{ color: '#E5E0DC', fontSize: 11, lineHeight: 15 }}>
                               1. Go to <Text style={{ fontWeight: 'bold' }}>Settings → Apps → NOVIA → Notifications → Notification categories</Text>.{"\n"}
                               2. Tap <Text style={{ fontWeight: 'bold' }}>NOVIA Sync Alarms</Text> and toggle <Text style={{ fontWeight: 'bold', color: '#FF6B00' }}>Bypass Do Not Disturb</Text> ON.{"\n"}
@@ -1928,7 +2030,7 @@ export default function App() {
 
                           {/* Vivo Section */}
                           <View style={{ backgroundColor: 'rgba(255, 255, 255, 0.03)', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255, 107, 0, 0.15)' }}>
-                            <Text style={{ color: '#FF6B00', fontWeight: 'bold', fontSize: 13, marginBottom: 4 }}>📱 Vivo Y35 (Funtouch OS 12/13)</Text>
+                            <Text style={{ color: '#FF6B00', fontWeight: 'bold', fontSize: 13, marginBottom: 4 }}>Vivo Y35 (Funtouch OS 12/13)</Text>
                             <Text style={{ color: '#E5E0DC', fontSize: 11, lineHeight: 15 }}>
                               1. Go to <Text style={{ fontWeight: 'bold' }}>Settings → Battery → Background power consumption management</Text>.{"\n"}
                               2. Find <Text style={{ fontWeight: 'bold' }}>NOVIA</Text> and select <Text style={{ fontWeight: 'bold', color: '#FF6B00' }}>Don't restrict background power</Text> (high power usage). Without this, Vivo's iManager will aggressively terminate coordinated alarms.{"\n"}
@@ -1964,7 +2066,7 @@ export default function App() {
                             }}
                           >
                             <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 11, letterSpacing: 0.5, textAlign: 'center', paddingHorizontal: 4 }}>
-                              ⚙️ APP INFO{"\n"}
+                              APP INFO{"\n"}
                               <Text style={{ fontSize: 9, fontWeight: 'normal', color: 'rgba(255, 255, 255, 0.8)' }}>(Battery / Alerts)</Text>
                             </Text>
                           </TouchableOpacity>
@@ -1996,7 +2098,7 @@ export default function App() {
                             }}
                           >
                             <Text style={{ color: '#FF6B00', fontWeight: '800', fontSize: 11, letterSpacing: 0.5, textAlign: 'center', paddingHorizontal: 4 }}>
-                              🔕 DND POLICY{"\n"}
+                              DND POLICY{"\n"}
                               <Text style={{ fontSize: 9, fontWeight: 'normal', color: 'rgba(255, 107, 0, 0.8)' }}>(Grant DND Access)</Text>
                             </Text>
                           </TouchableOpacity>
@@ -2123,30 +2225,30 @@ export default function App() {
                             {netOwed > 0 ? (
                               <View>
                                 <Text style={[styles.predText, { fontSize: 13, color: '#E5E5EA', marginBottom: 12 }]}>
-                                  🤝 Overall, <Text style={{ color: '#44D7B6', fontWeight: 'bold' }}>{partnerDisplayName}</Text> owes you <Text style={{ color: '#44D7B6', fontWeight: 'bold', fontSize: 15 }}>₹{netOwed.toFixed(2)}</Text> net.
+                                  Overall, <Text style={{ color: '#44D7B6', fontWeight: 'bold' }}>{partnerDisplayName}</Text> owes you <Text style={{ color: '#44D7B6', fontWeight: 'bold', fontSize: 15 }}>₹{netOwed.toFixed(2)}</Text> net.
                                 </Text>
                                 <TouchableOpacity 
                                   style={[styles.primaryButton, { backgroundColor: 'rgba(68, 215, 182, 0.15)', borderColor: '#44D7B6', borderWidth: 1 }]} 
-                                  onPress={() => Alert.alert("Reminder Sent 🔔", `Pinged ${partnerDisplayName} to settle the ₹${netOwed.toFixed(2)} debt!`)}
+                                  onPress={() => Alert.alert("Reminder Sent", `Pinged ${partnerDisplayName} to settle the ₹${netOwed.toFixed(2)} debt.`)}
                                 >
-                                  <Text style={[styles.primaryBtnText, { color: '#44D7B6' }]}>Ping Partner 🔔</Text>
+                                  <Text style={[styles.primaryBtnText, { color: '#44D7B6' }]}>Ping Partner</Text>
                                 </TouchableOpacity>
                               </View>
                             ) : netOwed < 0 ? (
                               <View>
                                 <Text style={[styles.predText, { fontSize: 13, color: '#E5E5EA', marginBottom: 12 }]}>
-                                  💸 Overall, you owe <Text style={{ color: '#FF6B00', fontWeight: 'bold' }}>{partnerDisplayName}</Text> <Text style={{ color: '#FF6B00', fontWeight: 'bold', fontSize: 15 }}>₹{Math.abs(netOwed).toFixed(2)}</Text> net.
+                                  Overall, you owe <Text style={{ color: '#FF6B00', fontWeight: 'bold' }}>{partnerDisplayName}</Text> <Text style={{ color: '#FF6B00', fontWeight: 'bold', fontSize: 15 }}>₹{Math.abs(netOwed).toFixed(2)}</Text> net.
                                 </Text>
                                 <TouchableOpacity 
                                   style={styles.primaryButton} 
                                   onPress={handleFastSettleUp}
                                 >
-                                  <Text style={styles.primaryBtnText}>Fast Settle Up 💳</Text>
+                                  <Text style={styles.primaryBtnText}>Fast Settle Up</Text>
                                 </TouchableOpacity>
                               </View>
                             ) : (
                               <Text style={[styles.predText, { fontSize: 13, color: '#A0A0A0', textAlign: 'center', marginVertical: 6 }]}>
-                                Balances are perfectly settled! 🤝 No outstanding debts.
+                                Balances are perfectly settled. No outstanding debts.
                               </Text>
                             )}
                           </View>
@@ -2223,7 +2325,7 @@ export default function App() {
                           onPress={() => openCalendarFor('financeDueDate')}
                         >
                           <Text style={styles.calendarPickerBtnText}>
-                            {financeDueDate ? `📅 DUE DATE: ${financeDueDate}` : '📅 OR CHOOSE CUSTOM DUE DATE FROM CALENDAR'}
+                            {financeDueDate ? `DUE DATE: ${financeDueDate}` : 'OR CHOOSE CUSTOM DUE DATE FROM CALENDAR'}
                           </Text>
                         </TouchableOpacity>
 
@@ -2346,7 +2448,7 @@ export default function App() {
                             onPress={() => openCalendarFor('periodStartDate')}
                           >
                             <Text style={styles.calendarPickerBtnText}>
-                              {periodStartDate ? `📅 START: ${periodStartDate}` : '📅 CHOOSE START DATE'}
+                              {periodStartDate ? `START: ${periodStartDate}` : 'CHOOSE START DATE'}
                             </Text>
                           </TouchableOpacity>
 
@@ -2356,7 +2458,7 @@ export default function App() {
                             onPress={() => openCalendarFor('periodEndDate')}
                           >
                             <Text style={styles.calendarPickerBtnText}>
-                              {periodEndDate ? `📅 END: ${periodEndDate}` : '📅 CHOOSE END DATE (OPTIONAL)'}
+                              {periodEndDate ? `END: ${periodEndDate}` : 'CHOOSE END DATE (OPTIONAL)'}
                             </Text>
                           </TouchableOpacity>
 
@@ -2492,7 +2594,7 @@ export default function App() {
                                 style={[styles.primaryButton, { marginTop: 16 }]} 
                                 onPress={() => setIsEditingCycle(true)}
                               >
-                                <Text style={styles.primaryBtnText}>✏️ Edit Details / Log Symptoms</Text>
+                                <Text style={styles.primaryBtnText}>Edit Details / Log Symptoms</Text>
                               </TouchableOpacity>
                             </View>
                           );
@@ -2508,7 +2610,7 @@ export default function App() {
                         onPress={() => openCalendarFor('hospitalDate')}
                       >
                         <Text style={styles.calendarPickerBtnText}>
-                          {hospitalDate ? `📅 VISIT DATE: ${hospitalDate}` : '📅 CHOOSE VISIT DATE'}
+                          {hospitalDate ? `VISIT DATE: ${hospitalDate}` : 'CHOOSE VISIT DATE'}
                         </Text>
                       </TouchableOpacity>
                       <TextInput
@@ -2610,13 +2712,17 @@ export default function App() {
 
           {/* Premium Bottom Tab Bar */}
           <View style={styles.tabBar}>
-            {(['hub', 'notes', 'alarms', 'finances', 'health', 'bucket'] as const).map((tab) => (
+            {(['hub', 'notes', 'alarms', 'finances', 'health', 'bucket', 'location'] as const).map((tab) => (
               <TouchableOpacity
                 key={tab}
                 style={[styles.tabItem, activeTab === tab && styles.activeTabItem]}
                 onPress={() => setActiveTab(tab)}
               >
-                <Text style={[styles.tabLabel, activeTab === tab && styles.activeTabLabel]}>
+                <Text
+                  style={[styles.tabLabel, activeTab === tab && styles.activeTabLabel]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                >
                   {tab.toUpperCase()}
                 </Text>
               </TouchableOpacity>
@@ -2860,7 +2966,7 @@ export default function App() {
                   {ringingAlarm.alarm_time.slice(0, 5)}
                 </Text>
                 <Text style={styles.ringingPurpose}>
-                  🔔 {ringingAlarm.purpose || 'Wake up! Live in sync.'}
+                  {ringingAlarm.purpose || 'Wake up. Live in sync.'}
                 </Text>
                 <Text style={styles.ringingSubText}>
                   Sync Mode: {ringingAlarm.sync_mode.toUpperCase()}
@@ -2909,10 +3015,10 @@ export default function App() {
             {ringingReminder && (
               <>
                 <Text style={styles.ringingPurpose}>
-                  ✨ {ringingReminder.title}
+                  {ringingReminder.title}
                 </Text>
                 <Text style={[styles.ringingSubText, { fontSize: 14, marginHorizontal: 20, textAlign: 'center' }]}>
-                  Time to complete your shared routine task!
+                  Time to complete your shared routine task.
                 </Text>
               </>
             )}
@@ -2979,18 +3085,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   card: {
-    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    backgroundColor: 'rgba(255, 255, 255, 0.055)',
     padding: THEME.spacing.lg,
-    borderRadius: THEME.borderRadius.md,
+    borderRadius: THEME.borderRadius.lg,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+    borderTopColor: 'rgba(255, 255, 255, 0.24)',
     width: '100%',
     marginTop: THEME.spacing.xl,
     shadowColor: '#000000',
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
+    shadowOpacity: 0.38,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 18 },
+    elevation: 8,
   },
   cardTitle: {
     fontSize: 22,
@@ -3059,16 +3166,18 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   partnerCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    backgroundColor: 'rgba(255, 255, 255, 0.055)',
     padding: THEME.spacing.md,
     borderRadius: THEME.borderRadius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+    borderTopColor: 'rgba(255, 255, 255, 0.24)',
     marginBottom: THEME.spacing.md,
     shadowColor: '#000000',
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.32,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 6,
   },
   sectionHeading: {
     fontSize: 15,
@@ -3104,17 +3213,18 @@ const styles = StyleSheet.create({
     marginTop: THEME.spacing.sm,
   },
   sectionCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    backgroundColor: 'rgba(255, 255, 255, 0.055)',
     padding: THEME.spacing.md,
     borderRadius: THEME.borderRadius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+    borderTopColor: 'rgba(255, 255, 255, 0.24)',
     marginBottom: THEME.spacing.md,
     shadowColor: '#000000',
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
+    shadowOpacity: 0.32,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 6,
   },
   moodRow: {
     flexDirection: 'row',
@@ -3136,14 +3246,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   input: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: 'rgba(0, 0, 0, 0.22)',
     color: '#FFFFFF',
-    borderRadius: THEME.borderRadius.sm,
-    padding: THEME.spacing.sm,
+    borderRadius: THEME.borderRadius.md,
+    paddingHorizontal: THEME.spacing.md,
+    paddingVertical: 12,
     fontSize: 19,
     marginBottom: THEME.spacing.sm,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderColor: 'rgba(255, 255, 255, 0.12)',
   },
   primaryButton: {
     backgroundColor: '#E74627',
@@ -3152,12 +3263,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: THEME.spacing.xs,
     borderWidth: 1.5,
-    borderColor: '#E74627',
+    borderColor: '#F18F2E',
+    borderTopColor: '#FBB360',
     shadowColor: '#E74627',
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 8,
   },
   primaryBtnText: {
     color: '#FFFFFF',
@@ -3199,11 +3311,12 @@ const styles = StyleSheet.create({
     marginTop: THEME.spacing.xs,
   },
   canvasCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    backgroundColor: 'rgba(255, 255, 255, 0.055)',
     padding: THEME.spacing.md,
     borderRadius: THEME.borderRadius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+    borderTopColor: 'rgba(255, 255, 255, 0.22)',
     minHeight: 350,
   },
   canvasText: {
@@ -3222,14 +3335,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   noteCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    backgroundColor: 'rgba(255, 255, 255, 0.055)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+    borderTopColor: 'rgba(255, 255, 255, 0.22)',
     borderRadius: THEME.borderRadius.md,
     padding: THEME.spacing.md,
     width: '48%',
     marginBottom: THEME.spacing.md,
     minHeight: 128,
+    shadowColor: '#000000',
+    shadowOpacity: 0.26,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 5,
   },
   noteAuthor: {
     color: THEME.colors.primary,
@@ -3298,17 +3417,18 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   alarmCreatorCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.07)',
-    borderColor: 'rgba(255, 255, 255, 0.18)',
+    backgroundColor: 'rgba(255, 255, 255, 0.055)',
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+    borderTopColor: 'rgba(255, 255, 255, 0.24)',
     borderWidth: 1,
     borderRadius: THEME.borderRadius.md,
     padding: THEME.spacing.md,
     marginBottom: THEME.spacing.md,
     shadowColor: '#000000',
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 5,
+    shadowOpacity: 0.38,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 18 },
+    elevation: 8,
   },
   alarmPreview: {
     color: '#FFFFFF',
@@ -3428,11 +3548,12 @@ const styles = StyleSheet.create({
     color: '#E74627',
   },
   emptyCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
     padding: THEME.spacing.lg,
     borderRadius: THEME.borderRadius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+    borderTopColor: 'rgba(255, 255, 255, 0.18)',
     alignItems: 'center',
   },
   emptyText: {
@@ -3441,20 +3562,22 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   alarmRowCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    backgroundColor: 'rgba(255, 255, 255, 0.055)',
     padding: THEME.spacing.md,
     borderRadius: THEME.borderRadius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+    borderTopColor: 'rgba(255, 255, 255, 0.22)',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: THEME.spacing.sm,
     gap: 10,
     shadowColor: '#000000',
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.28,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 5,
   },
   alarmTime: {
     fontSize: 32,
@@ -3521,19 +3644,21 @@ const styles = StyleSheet.create({
     marginBottom: THEME.spacing.sm,
   },
   financeCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    backgroundColor: 'rgba(255, 255, 255, 0.055)',
     padding: THEME.spacing.md,
     borderRadius: THEME.borderRadius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+    borderTopColor: 'rgba(255, 255, 255, 0.22)',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: THEME.spacing.sm,
     shadowColor: '#000000',
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.28,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 5,
   },
   financeName: {
     fontSize: 15,
@@ -3624,12 +3749,80 @@ const styles = StyleSheet.create({
     textDecorationLine: 'line-through',
     color: THEME.colors.textMuted,
   },
+  locationPlace: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  locationCoords: {
+    color: '#A29AA8',
+    fontSize: 13,
+    fontWeight: '500',
+    fontVariant: ['tabular-nums'],
+    marginBottom: 2,
+  },
+  locationMeta: {
+    color: '#8A8A8A',
+    fontSize: 12,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  locationDistance: {
+    color: THEME.colors.accent,
+    fontSize: 15,
+    fontWeight: '800',
+    marginTop: 4,
+    marginBottom: THEME.spacing.sm,
+  },
+  locationErrorText: {
+    color: THEME.colors.danger,
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: THEME.spacing.sm,
+    marginBottom: THEME.spacing.xs,
+  },
+  locationSecondaryBtn: {
+    marginTop: THEME.spacing.sm,
+    paddingVertical: 12,
+    borderRadius: THEME.borderRadius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(241, 143, 46, 0.5)',
+    backgroundColor: 'rgba(241, 143, 46, 0.10)',
+    alignItems: 'center',
+  },
+  locationSecondaryBtnText: {
+    color: THEME.colors.accent,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  locationStopBtn: {
+    marginTop: THEME.spacing.sm,
+    paddingVertical: 12,
+    borderRadius: THEME.borderRadius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(231, 76, 60, 0.5)',
+    alignItems: 'center',
+  },
+  locationStopBtnText: {
+    color: '#FF6B5A',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  locationHint: {
+    color: '#5F5F5F',
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: THEME.spacing.md,
+    textAlign: 'center',
+  },
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(8, 8, 7, 0.95)',
-    borderColor: '#E74627',
-    borderWidth: 1.5,
-    borderRadius: 30,
+    backgroundColor: 'rgba(14, 13, 12, 0.86)',
+    borderColor: 'rgba(231, 70, 39, 0.45)',
+    borderTopColor: 'rgba(255, 255, 255, 0.16)',
+    borderWidth: 1,
+    borderRadius: 34,
     position: 'absolute',
     bottom: Platform.OS === 'android' ? 76 : 64,
     left: 16,
@@ -3638,12 +3831,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     alignItems: 'center',
     paddingHorizontal: 8,
-    shadowColor: '#E74627',
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
+    shadowColor: '#000000',
+    shadowOpacity: 0.55,
+    shadowRadius: 26,
+    shadowOffset: { width: 0, height: 16 },
     zIndex: 10,
-    elevation: 10,
+    elevation: 14,
   },
   bottomOverlayFade: {
     position: 'absolute',

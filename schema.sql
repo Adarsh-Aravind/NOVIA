@@ -2,6 +2,7 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Clean up any existing tables to avoid duplicate relations
+DROP TABLE IF EXISTS public.locations CASCADE;
 DROP TABLE IF EXISTS public.bucket_list CASCADE;
 DROP TABLE IF EXISTS public.medical_vault CASCADE;
 DROP TABLE IF EXISTS public.sleep_logs CASCADE;
@@ -184,6 +185,17 @@ CREATE TABLE public.bucket_list (
     created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
 
+-- 13. Location Sharing Table (One latest position per user, couple-scoped)
+CREATE TABLE public.locations (
+    user_id UUID PRIMARY KEY REFERENCES public.profiles(id) ON DELETE CASCADE,
+    couple_id UUID NOT NULL REFERENCES public.couples(id) ON DELETE CASCADE,
+    latitude DOUBLE PRECISION NOT NULL,
+    longitude DOUBLE PRECISION NOT NULL,
+    accuracy DOUBLE PRECISION, -- horizontal accuracy in metres
+    place_label TEXT, -- optional reverse-geocoded label
+    updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
 ---
 --- ROW LEVEL SECURITY & RELATIONAL ACCESS POLICIES
 ---
@@ -202,12 +214,17 @@ ALTER TABLE public.diet_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sleep_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.medical_vault ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bucket_list ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.locations ENABLE ROW LEVEL SECURITY;
 
 -- Helper Function to resolve current user's active couple ID
 CREATE OR REPLACE FUNCTION public.get_couple_id()
-RETURNS UUID AS $$
+RETURNS UUID
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
     SELECT couple_id FROM public.profiles WHERE id = auth.uid();
-$$ LANGUAGE sql SECURITY DEFINER;
+$$;
 
 -- Policies for Couples table (A user can only select/insert records they are part of)
 CREATE POLICY "Users can view their own couple pairing"
@@ -221,7 +238,13 @@ CREATE POLICY "Users can view their own and partner's profile"
 
 CREATE POLICY "Users can update their own profile"
     ON public.profiles FOR UPDATE
-    USING (auth.uid() = id);
+    USING (auth.uid() = id)
+    WITH CHECK (auth.uid() = id);
+
+-- Clients may not write couple_id / partner_id directly; pairing goes through
+-- the SECURITY DEFINER RPCs defined at the end of this file.
+REVOKE UPDATE (couple_id, partner_id) ON public.profiles FROM authenticated;
+REVOKE UPDATE (couple_id, partner_id) ON public.profiles FROM anon;
 
 -- Policies for Shared couple-scoped tables (Reminders, Alarms, Punishments, Notes, Brainstorms, Finances, Periods, Bucket List)
 CREATE POLICY "Allow access to couple data"
@@ -256,6 +279,25 @@ CREATE POLICY "Allow access to bucket list items"
     ON public.bucket_list FOR ALL
     USING (couple_id = public.get_couple_id());
 
+-- Location sharing: both partners may READ every row in their couple, but a
+-- user may only write (insert/update/delete) their own position row.
+CREATE POLICY "Read couple locations"
+    ON public.locations FOR SELECT
+    USING (couple_id = public.get_couple_id());
+
+CREATE POLICY "Insert own location"
+    ON public.locations FOR INSERT
+    WITH CHECK (user_id = auth.uid() AND couple_id = public.get_couple_id());
+
+CREATE POLICY "Update own location"
+    ON public.locations FOR UPDATE
+    USING (user_id = auth.uid())
+    WITH CHECK (user_id = auth.uid() AND couple_id = public.get_couple_id());
+
+CREATE POLICY "Delete own location"
+    ON public.locations FOR DELETE
+    USING (user_id = auth.uid());
+
 -- Policies for Personal User-scoped tables (Diet, Sleep, Medical Records Vault)
 CREATE POLICY "Allow access to own diet logs"
     ON public.diet_logs FOR ALL
@@ -276,7 +318,11 @@ CREATE POLICY "Allow access to own and partner medical records"
 
 -- Triggers for Profile Creation on user sign-up
 CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
     INSERT INTO public.profiles (id, display_name, avatar_url)
     VALUES (
@@ -286,7 +332,88 @@ BEGIN
     );
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
+
+-- Consent-validated pairing / unpairing (see migration 20260705_security_hardening.sql)
+CREATE OR REPLACE FUNCTION public.pair_with_partner(partner_uuid UUID)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    me UUID := auth.uid();
+    new_couple_id UUID;
+    my_couple UUID;
+    their_couple UUID;
+BEGIN
+    IF me IS NULL THEN
+        RAISE EXCEPTION 'Not authenticated';
+    END IF;
+    IF partner_uuid = me THEN
+        RAISE EXCEPTION 'You cannot pair with yourself';
+    END IF;
+
+    SELECT couple_id INTO my_couple FROM public.profiles WHERE id = me;
+    IF my_couple IS NOT NULL THEN
+        RAISE EXCEPTION 'You are already paired';
+    END IF;
+
+    SELECT couple_id INTO their_couple FROM public.profiles WHERE id = partner_uuid;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Partner not found';
+    END IF;
+    IF their_couple IS NOT NULL THEN
+        RAISE EXCEPTION 'Partner is already paired with another account';
+    END IF;
+
+    INSERT INTO public.couples (user_1_id, user_2_id)
+    VALUES (me, partner_uuid)
+    RETURNING id INTO new_couple_id;
+
+    UPDATE public.profiles
+       SET couple_id = new_couple_id, partner_id = partner_uuid, updated_at = NOW()
+     WHERE id = me;
+
+    UPDATE public.profiles
+       SET couple_id = new_couple_id, partner_id = me, updated_at = NOW()
+     WHERE id = partner_uuid;
+
+    RETURN new_couple_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.unpair()
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    me UUID := auth.uid();
+    my_couple UUID;
+BEGIN
+    IF me IS NULL THEN
+        RAISE EXCEPTION 'Not authenticated';
+    END IF;
+
+    SELECT couple_id INTO my_couple FROM public.profiles WHERE id = me;
+    IF my_couple IS NULL THEN
+        RETURN;
+    END IF;
+
+    UPDATE public.profiles
+       SET couple_id = NULL, partner_id = NULL, updated_at = NOW()
+     WHERE couple_id = my_couple;
+
+    DELETE FROM public.couples WHERE id = my_couple;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.pair_with_partner(UUID) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.unpair() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.pair_with_partner(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.unpair() TO authenticated;
 
 CREATE OR REPLACE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
@@ -299,3 +426,4 @@ CREATE INDEX idx_finances_couple_due ON public.finances(couple_id, due_date);
 CREATE INDEX idx_alarms_couple_id ON public.alarms(couple_id);
 CREATE INDEX idx_periods_couple_start ON public.periods(couple_id, start_date);
 CREATE INDEX idx_medical_user_type ON public.medical_vault(user_id, metric_type);
+CREATE INDEX idx_locations_couple_id ON public.locations(couple_id);

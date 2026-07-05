@@ -1,7 +1,31 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../services/supabase';
 import { Alarm, Punishment } from '../types';
-import { cancelScheduledNotificationsByPrefix, scheduleLocalNotification, scheduleSharedReminder } from '../services/notification';
+import { syncCoupleAlarms, promptExactAlarmPermission, snoozeAlarm } from '../services/alarmService';
+
+// Creative, couple-flirty punishments handed out when someone won't get up.
+// Long-distance friendly — everything is doable from opposite ends of the map.
+// Shown to BOTH partners (offender + partner) via the realtime punishments feed.
+const FLIRTY_PUNISHMENTS = [
+  'Owes their partner a good-morning voice note singing their favourite song 🎤',
+  'Must send 3 selfies today — bed hair mandatory, no filters 🤳',
+  'Has to text their partner a cheesy pickup line every hour til noon 💌',
+  'Loses playlist rights — partner picks every song on the shared playlist today 🎧',
+  'Owes a full 30-minute video call date tonight, phone propped up, undivided 📹',
+  'Must order their partner’s favourite food to their door — surprise delivery 🍕',
+  'Has to write and send a 5-line poem about missing their partner ✍️❤️',
+  'Owes a voice note narrating their whole day like a lovesick documentary 🎙️',
+  'Must be the one to send the first good-morning AND goodnight text for a week 🌙',
+  'Has to send a 60-second video saying 3 things they love about their partner 🎬',
+];
+
+const FLIRTY_LOCKDOWNS = [
+  'Snooze royalty detected 👑🔒 App stays locked until your partner video-calls you awake and unlocks it.',
+  'Too cozy in bed 😴🔒 Access is frozen until your partner rings you and personally talks you up.',
+  'Locked out for over-snoozing 🔒 Only your partner’s tap can free you — go call and be adorable about it.',
+];
+
+const pickRandom = (list: string[]) => list[Math.floor(Math.random() * list.length)];
 
 type AddAlarmInput = {
   alarmId?: string;
@@ -12,29 +36,14 @@ type AddAlarmInput = {
   purpose: string;
 };
 
-function nextAlarmDate(alarm: Alarm) {
-  const [hour, minute] = alarm.alarm_time.split(':').map(Number);
-  const now = new Date();
-  const activeDays = alarm.days_active.length > 0 ? alarm.days_active : [0, 1, 2, 3, 4, 5, 6];
-
-  for (let offset = 0; offset < 8; offset += 1) {
-    const candidate = new Date(now);
-    candidate.setDate(now.getDate() + offset);
-    candidate.setHours(hour, minute, 0, 0);
-
-    if (activeDays.includes(candidate.getDay()) && candidate.getTime() > now.getTime()) {
-      return candidate;
-    }
-  }
-
-  return null;
-}
-
 export function useAlarms(coupleId: string | null, userId: string | null) {
   const [alarms, setAlarms] = useState<Alarm[]>([]);
   const [activePunishments, setActivePunishments] = useState<Punishment[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [userKey, setUserKey] = useState<1 | 2 | null>(null);
+  // True when there are enabled alarms but the OS refused to arm any of them
+  // (almost always because the exact-alarm permission is revoked).
+  const [alarmsBlocked, setAlarmsBlocked] = useState<boolean>(false);
 
   const fetchAlarmsData = async () => {
     if (!coupleId || !userId) return;
@@ -103,30 +112,25 @@ export function useAlarms(coupleId: string | null, userId: string | null) {
     };
   }, [coupleId, userId]);
 
+  // Schedule real OS-level alarms (notifee, exact SET_ALARM_CLOCK triggers) so
+  // they ring even when the app is killed or the phone is locked / in Doze.
   useEffect(() => {
-    const scheduleSharedAlarms = async () => {
-      if (!coupleId) return;
-
-      await cancelScheduledNotificationsByPrefix(`alarm:${coupleId}:`);
-      await Promise.all(
-        alarms
-          .filter((alarm) => alarm.is_enabled)
-          .map(async (alarm) => {
-            const fireDate = nextAlarmDate(alarm);
-            if (!fireDate) return null;
-
-            return scheduleSharedReminder({
-              reminderKey: `alarm:${coupleId}:${alarm.id}`,
-              title: alarm.purpose || 'NOVIA Alarm',
-              body: `${alarm.alarm_time.slice(0, 5)} ${alarm.sync_mode} alarm is ringing for both partners.`,
-              date: fireDate,
-              channelId: 'alarm-channel',
-            });
-          })
-      );
-    };
-
-    scheduleSharedAlarms();
+    if (!coupleId) return;
+    syncCoupleAlarms(alarms)
+      .then((result) => {
+        // Flag when we have enabled alarms that the OS won't actually fire, so
+        // the UI can prompt for a fix instead of the alarm silently never
+        // ringing. Exact-alarm permission being off is the decisive signal:
+        // notifee still *stores* the triggers (so `armed` looks healthy), but
+        // Android never arms them.
+        setAlarmsBlocked(
+          result.expected > 0 && (result.armed === 0 || !result.exactAlarmAllowed),
+        );
+      })
+      .catch((e) => {
+        console.error('[Alarms] Failed to schedule notifee alarms:', e);
+        setAlarmsBlocked(true);
+      });
   }, [alarms, coupleId]);
 
   const toggleAlarm = async (alarmId: string, enabled: boolean) => {
@@ -242,27 +246,24 @@ export function useAlarms(coupleId: string | null, userId: string | null) {
     // A. Perform alarm DB update
     await supabase.from('alarms').update(updates).eq('id', alarmId);
 
-    // B. Schedule local high-priority snooze notification in 5 minutes (300s)
-    await scheduleLocalNotification({
-      title: "NOVIA Alarm",
-      body: `Wake up! Snooze active (${nextSnoozeCount}/3).`,
-      trigger: { seconds: 300 } as any,
-      channelId: 'alarm-channel',
-    });
+    // B. Re-ring as a REAL full-screen notifee alarm in 5 minutes (loops the
+    //    sound, re-surfaces the branded ring screen, fires over the lock
+    //    screen) rather than a plain heads-up notification.
+    await snoozeAlarm(
+      alarmId,
+      alarm.purpose || 'NOVIA Alarm',
+      `Snooze ${nextSnoozeCount} — wake up, love 💛`,
+      5,
+    );
 
-    // C. Check snooze limit boundary for automatic punishment trigger
+    // C. Escalating, couple-flirty punishments — all mirrored to the partner via
+    //    the realtime punishments feed. 1st snooze is a grace (no punishment);
+    //    the creative flirty penalty lands from the 2nd snooze; a playful
+    //    lockout from the 3rd.
     if (nextSnoozeCount >= 3) {
-      await triggerPunishment(
-        'alarm_skip',
-        'visual_restriction',
-        `Snoozed alarm 3 times! All access is locked until partner resolves this.`
-      );
-    } else {
-      await triggerPunishment(
-        'alarm_skip',
-        'penalty_status',
-        `Snoozed the alarm! (Snooze count: ${nextSnoozeCount}/3)`
-      );
+      await triggerPunishment('alarm_skip', 'visual_restriction', pickRandom(FLIRTY_LOCKDOWNS));
+    } else if (nextSnoozeCount >= 2) {
+      await triggerPunishment('alarm_skip', 'penalty_status', pickRandom(FLIRTY_PUNISHMENTS));
     }
   };
 
@@ -311,6 +312,8 @@ export function useAlarms(coupleId: string | null, userId: string | null) {
     activePunishments,
     loading,
     userKey,
+    alarmsBlocked,
+    promptExactAlarmPermission,
     addAlarm,
     deleteAlarm,
     toggleAlarm,

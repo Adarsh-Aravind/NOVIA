@@ -15,7 +15,7 @@ Notifications.setNotificationHandler({
 export async function configureNotificationsAsync() {
   if (Platform.OS === 'android') {
     // 1. High-Priority Alarm channel (Bypasses silent profile and DND if configured)
-    await Notifications.setNotificationChannelAsync('alarm-channel', {
+    await Notifications.setNotificationChannelAsync('alarm-channel-v2', {
       name: 'NOVIA Sync Alarms',
       description: 'Simultaneous & Coordinated couples alarms to sync waking up.',
       importance: Notifications.AndroidImportance.MAX,
@@ -24,6 +24,10 @@ export async function configureNotificationsAsync() {
       sound: 'default',
       bypassDnd: true, // Bypass Do Not Disturb profile
       showBadge: true,
+      audioAttributes: {
+        usage: Notifications.AndroidAudioUsage.ALARM,
+        contentType: Notifications.AndroidAudioContentType.SONIFICATION,
+      },
     });
 
     // 2. Standard Reminders channel
@@ -38,12 +42,12 @@ export async function configureNotificationsAsync() {
   // Request user permission for push notifications
   const { status: existingStatus } = await Notifications.getPermissionsAsync();
   let finalStatus = existingStatus;
-  
+
   if (existingStatus !== 'granted') {
     const { status } = await Notifications.requestPermissionsAsync();
     finalStatus = status;
   }
-  
+
   return finalStatus === 'granted';
 }
 
@@ -57,12 +61,12 @@ export async function scheduleLocalNotification({
   title: string;
   body: string;
   trigger: Notifications.NotificationTriggerInput;
-  channelId?: 'alarm-channel' | 'reminders-channel';
+  channelId?: 'alarm-channel-v2' | 'reminders-channel';
   data?: Record<string, any>;
 }) {
   // Enrich trigger block with channelId so Android maps the alert to the correct channel
-  const enrichedTrigger = 
-    trigger instanceof Date 
+  const enrichedTrigger =
+    trigger instanceof Date
       ? { type: Notifications.SchedulableTriggerInputTypes.DATE, date: trigger, channelId }
       : (trigger && typeof trigger === 'object'
           ? { ...(trigger as object), channelId }
@@ -73,7 +77,7 @@ export async function scheduleLocalNotification({
       title,
       body,
       data,
-      sound: channelId === 'alarm-channel' ? 'default' : undefined,
+      sound: channelId === 'alarm-channel-v2' ? 'default' : undefined,
       categoryIdentifier: channelId,
     },
     trigger: enrichedTrigger,
@@ -103,7 +107,7 @@ export async function scheduleSharedReminder({
   title: string;
   body: string;
   date: Date;
-  channelId?: 'alarm-channel' | 'reminders-channel';
+  channelId?: 'alarm-channel-v2' | 'reminders-channel';
 }) {
   if (date.getTime() <= Date.now()) return null;
 
@@ -123,7 +127,7 @@ export async function cancelAllScheduledNotifications() {
 export async function getAlarmChannelDndBypassGranted(): Promise<boolean> {
   if (Platform.OS !== 'android') return true;
   try {
-    const channel = await Notifications.getNotificationChannelAsync('alarm-channel');
+    const channel = await Notifications.getNotificationChannelAsync('alarm-channel-v2');
     return !!(channel && channel.bypassDnd);
   } catch (error) {
     console.warn('Error checking alarm channel DND bypass:', error);

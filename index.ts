@@ -18,7 +18,28 @@ console.error = (...args: any[]) => {
   }
   originalConsoleError(...args);
 };
+import notifee, { EventType } from '@notifee/react-native';
+import { stopRingingAlarm, snoozeAlarm } from './src/services/alarmService';
 
+notifee.onBackgroundEvent(async ({ type, detail }) => {
+  const n = detail.notification;
+  if (n?.data?.kind !== 'alarm') return;
+
+  if (type === EventType.ACTION_PRESS) {
+    if (detail.pressAction?.id === 'stop-alarm' && n.id) {
+      await stopRingingAlarm(n.id);
+    }
+    if (detail.pressAction?.id === 'snooze-alarm') {
+      await snoozeAlarm(
+        String(n.data?.alarmId ?? 'snoozed'),
+        n.title ?? 'Alarm',
+        n.body ?? '',
+        5,
+      );
+    }
+  }
+});
+ 
 import { registerRootComponent } from 'expo';
 import App from './App';
 

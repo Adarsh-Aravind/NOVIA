@@ -140,6 +140,16 @@ export interface MedicalRecord {
   created_at: string;
 }
 
+export interface PartnerLocation {
+  user_id: string;
+  couple_id: string;
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;
+  place_label: string | null;
+  updated_at: string;
+}
+
 export interface BucketListItem {
   id: string;
   couple_id: string;
