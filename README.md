@@ -44,6 +44,13 @@ Whether it's syncing your wake-up alarms, tracking menstrual health cycles, shar
 ### 🚨 7. Offline First-Aid Guide
 *   **Quick Search**: Fully offline search engine with a curated list of emergency medical guidelines (e.g., choking, burns, fractures, CPR).
 
+### 📍 8. Real-Time Location Sharing
+*   **Live Co-Presence Maps**: Share your exact coordinates, accuracy, and reverse-geocoded place labels with your partner seamlessly.
+*   **Opt-In Privacy**: Strict row-level security limits access to your partner only, ensuring total privacy.
+
+### 🔄 9. Over-The-Air (OTA) Updates
+*   **Seamless Delivery**: Automatically fetches and applies the latest app features and bug fixes without needing to download a new APK or wait for app store approvals.
+
 ---
 
 ## 🛠️ Technology Stack
@@ -146,6 +153,15 @@ erDiagram
         boolean is_completed
         uuid completed_by FK
     }
+    LOCATIONS {
+        uuid user_id PK, FK
+        uuid couple_id FK
+        double latitude
+        double longitude
+        double accuracy
+        text place_label
+        timestamptz updated_at
+    }
 
     COUPLES ||--o{ PROFILES : "links"
     COUPLES ||--o{ REMINDERS : "belongs_to"
@@ -155,7 +171,9 @@ erDiagram
     COUPLES ||--o{ FINANCES : "belongs_to"
     COUPLES ||--o{ PERIODS : "belongs_to"
     COUPLES ||--o{ BUCKET_LIST : "belongs_to"
+    COUPLES ||--o{ LOCATIONS : "belongs_to"
     PROFILES ||--o{ PUNISHMENTS : "commits"
+    PROFILES ||--|| LOCATIONS : "has_current"
 ```
 
 ### 🔒 Row-Level Security (RLS) & Multi-Tenancy
@@ -224,11 +242,12 @@ npm run start
 
 ```
 ├── .expo/               # Expo cache and system configuration
-├── assets/              # Static media resources and adaptive icons
+├── assets/              # Static media resources, adaptive icons, and sound files
+├── plugins/             # Custom Expo config plugins (e.g., fullscreen alarm intents)
 ├── src/
 │   ├── constants/       # App themes, styling variables, and offline first aid database
-│   ├── hooks/           # Custom React hooks (real-time notes, alarms, period cycle math)
-│   ├── services/        # Background tasks, Expo push notifications, and Supabase client
+│   ├── hooks/           # Custom React hooks (location, notes, alarms, period cycle math)
+│   ├── services/        # Services for alarms, location tracking, OTA updates, and Supabase
 │   ├── types/           # Core TypeScript type definitions and interfaces
 │   └── utils/           # Helper calculations, blood pressure/sugar validators, and debouncers
 ├── App.tsx              # Core app component housing all navigations, states, and tab views
