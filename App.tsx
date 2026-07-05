@@ -1,14 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  setupAlarmChannel,
-  requestAlarmPermissions,
-  registerAlarmForegroundHandler,
-  syncCoupleAlarms,
-  stopRingingAlarm,
-  promptExactAlarmPermission,
-  getActiveRingingAlarmId,
-} from './src/services/alarmService';
-import {
   StyleSheet,
   Text,
   View,
@@ -29,23 +20,23 @@ import {
   Image
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
-import { Menu, Settings as SettingsIcon, LogOut, X, User, Heart, Check, Square, CheckSquare } from 'lucide-react-native';
+import { Menu, Settings as SettingsIcon, LogOut, X, User, Heart, Check, Square, CheckSquare, Home, FileText, Wallet, Activity, MapPin, ListChecks, MessageSquareWarning, ChevronLeft, Send, BookOpen } from 'lucide-react-native';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, RadialGradient, Rect, Stop, Filter, FeTurbulence, FeColorMatrix, FeComposite } from 'react-native-svg';
 import * as Notifications from 'expo-notifications';
-import { Alarm, Reminder } from './src/types';
+import { Todo, TodoRecurrence, Complaint, AppUpdate } from './src/types';
 import { useAuth } from './src/hooks/useAuth';
 import { useRealtimeNotes } from './src/hooks/useRealtimeNotes';
 import { useMood } from './src/hooks/useMood';
-import { useAlarms } from './src/hooks/useAlarms';
+import { useTodos } from './src/hooks/useTodos';
 import { usePeriods } from './src/hooks/usePeriods';
-import { useReminders } from './src/hooks/useReminders';
+import { useComplaints } from './src/hooks/useComplaints';
 import { useLocation } from './src/hooks/useLocation';
 import { formatDistance, formatUpdatedAgo, haversineMeters, mapsUrl } from './src/services/locationService';
-import { configureNotificationsAsync, getAlarmChannelDndBypassGranted } from './src/services/notification';
+import { configureNotificationsAsync, PRIORITY_CHANNEL } from './src/services/notification';
 import { cancelScheduledNotificationsByPrefix, scheduleSharedReminder, scheduleLocalNotification } from './src/services/notification';
 import { supabase } from './src/services/supabase';
-import { checkAndApplyUpdate } from './src/services/updates';
-import notifee from '@notifee/react-native';
+import { checkAndApplyUpdate, fetchAppUpdates, getLastSeenUpdateAt, markUpdatesSeen, unseenUpdates } from './src/services/updates';
+import { getWordOfDay } from './src/constants/vocabulary';
 import { FIRST_AID_DATA } from './src/constants/firstAidData';
 import { THEME } from './src/constants/theme';
 
@@ -95,6 +86,159 @@ function SpaceBackdrop() {
   );
 }
 
+const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
+
+/**
+ * PressableScale — a touchable that gently springs inward on press.
+ * Gives every interactive glass surface a soft, tactile neumorphic response.
+ */
+function PressableScale({
+  children,
+  onPress,
+  onLongPress,
+  style,
+  scaleTo = 0.96,
+  disabled = false,
+  activeOpacity = 0.92,
+  hitSlop,
+}: {
+  children: React.ReactNode;
+  onPress?: () => void;
+  onLongPress?: () => void;
+  style?: any;
+  scaleTo?: number;
+  disabled?: boolean;
+  activeOpacity?: number;
+  hitSlop?: any;
+}) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const pressIn = () =>
+    Animated.spring(scale, { toValue: scaleTo, useNativeDriver: true, speed: 50, bounciness: 0 }).start();
+  const pressOut = () =>
+    Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 40, bounciness: 7 }).start();
+  return (
+    <AnimatedTouchable
+      activeOpacity={activeOpacity}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      onPressIn={pressIn}
+      onPressOut={pressOut}
+      disabled={disabled}
+      hitSlop={hitSlop}
+      style={[style, { transform: [{ scale }] }]}
+    >
+      {children}
+    </AnimatedTouchable>
+  );
+}
+
+/**
+ * ScreenTransition — replays a soft fade + rise whenever its `key` changes.
+ * Wrap tab content and key it on the active tab for seamless screen swaps.
+ */
+function ScreenTransition({ children }: { children: React.ReactNode }) {
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    anim.setValue(0);
+    Animated.timing(anim, {
+      toValue: 1,
+      duration: 440,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, []);
+  return (
+    <Animated.View
+      style={{
+        opacity: anim,
+        transform: [
+          { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) },
+          { scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.985, 1] }) },
+        ],
+      }}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
+/**
+ * AnimatedTabBar — frosted glass pill dock with a sliding accent indicator
+ * that glides between tabs, plus per-item press springs.
+ */
+const TAB_ICONS: Record<string, React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>> = {
+  hub: Home,
+  notes: FileText,
+  finances: Wallet,
+  health: Activity,
+};
+
+function AnimatedTabBar<T extends string>({
+  tabs,
+  activeTab,
+  onChange,
+}: {
+  tabs: readonly T[];
+  activeTab: T;
+  onChange: (t: T) => void;
+}) {
+  const INNER_PAD = 6;
+  const [barW, setBarW] = useState(0);
+  // activeTab may be a Hub sub-screen (todos/complaints/bucket/location) that
+  // isn't on the bar — indexOf is -1 then, so we hide the sliding indicator.
+  const activeIndex = tabs.indexOf(activeTab);
+  const onBar = activeIndex >= 0;
+  const indicator = useRef(new Animated.Value(onBar ? activeIndex : 0)).current;
+  const slotW = barW > 0 ? (barW - INNER_PAD * 2) / tabs.length : 0;
+
+  useEffect(() => {
+    if (!onBar) return;
+    Animated.spring(indicator, {
+      toValue: activeIndex,
+      useNativeDriver: true,
+      speed: 18,
+      bounciness: 9,
+    }).start();
+  }, [activeIndex, onBar]);
+
+  const translateX = indicator.interpolate({
+    inputRange: tabs.map((_, i) => i),
+    outputRange: tabs.map((_, i) => INNER_PAD + i * slotW),
+  });
+
+  return (
+    <View style={styles.tabBar} onLayout={(e) => setBarW(e.nativeEvent.layout.width)}>
+      {slotW > 0 && onBar && (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.tabIndicator,
+            { width: slotW, transform: [{ translateX }] },
+          ]}
+        />
+      )}
+      {tabs.map((tab) => {
+        const isActive = activeTab === tab;
+        const Icon = TAB_ICONS[tab] || Home;
+        return (
+          <PressableScale
+            key={tab}
+            scaleTo={0.9}
+            style={styles.tabItem}
+            onPress={() => onChange(tab)}
+          >
+            <Icon
+              size={24}
+              color={isActive ? '#F18F2E' : 'rgba(255,255,255,0.55)'}
+              strokeWidth={isActive ? 2.5 : 2}
+            />
+          </PressableScale>
+        );
+      })}
+    </View>
+  );
+}
+
 const BlinkingBucketRow = ({ item, getCreatorName, onToggle, onDelete }: { item: any; getCreatorName: (creatorId?: string | null) => string; onToggle: () => void; onDelete: () => void }) => {
   const blinkAnim = React.useRef(new Animated.Value(1)).current;
 
@@ -115,16 +259,8 @@ const BlinkingBucketRow = ({ item, getCreatorName, onToggle, onDelete }: { item:
     <Animated.View style={{ opacity: blinkAnim }}>
       <TouchableOpacity 
         style={[
-          styles.bucketRow, 
-          { 
-            borderColor: 'rgba(255, 107, 0, 0.25)',
-            backgroundColor: 'rgba(255, 255, 255, 0.03)',
-            shadowColor: '#FF6B00',
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.1,
-            shadowRadius: 4,
-          }
-        ]} 
+          styles.bucketRow,
+        ]}
         onPress={handlePress}
         activeOpacity={0.7}
       >
@@ -147,14 +283,12 @@ const BlinkingBucketRow = ({ item, getCreatorName, onToggle, onDelete }: { item:
                 onDelete();
               }}
               style={{
-                width: 24,
-                height: 24,
-                borderRadius: 12,
-                backgroundColor: 'rgba(255, 75, 75, 0.12)',
+                width: 26,
+                height: 26,
+                borderRadius: 13,
+                backgroundColor: 'rgba(255, 75, 75, 0.16)',
                 alignItems: 'center',
                 justifyContent: 'center',
-                borderWidth: 1,
-                borderColor: 'rgba(255, 75, 75, 0.3)',
               }}
             >
               <X size={12} color="#FF4D4D" strokeWidth={2.5} />
@@ -172,18 +306,8 @@ const BlinkingBucketRow = ({ item, getCreatorName, onToggle, onDelete }: { item:
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'hub' | 'notes' | 'alarms' | 'finances' | 'health' | 'bucket' | 'location'>('hub');
-  const [isDndBypassGranted, setIsDndBypassGranted] = useState(false);
+  const [activeTab, setActiveTab] = useState<'hub' | 'notes' | 'finances' | 'health' | 'bucket' | 'location' | 'todos' | 'complaints'>('hub');
 
-  const checkDndBypass = async () => {
-    try {
-      const isGranted = await getAlarmChannelDndBypassGranted();
-      setIsDndBypassGranted(isGranted);
-    } catch (e) {
-      console.warn("Failed to check DND bypass:", e);
-    }
-  };
-  
   // Custom hooks
   const { 
     session, 
@@ -235,9 +359,16 @@ export default function App() {
 
   const { notes, isPartnerTyping, addNote, removeNote } = useRealtimeNotes(coupleId, userId);
   const { currentMood, partnerMood, partnerName, updateMood } = useMood(coupleId, userId);
-  const { alarms, activePunishments, addAlarm, deleteAlarm, toggleAlarm, triggerAlarmSnooze, dismissAlarm, resolvePunishment, userKey, alarmsBlocked } = useAlarms(coupleId, userId);
+  const { todos, addTodo, toggleTodo, deleteTodo } = useTodos(coupleId, userId);
   const { records, predictions, addPeriodLog, refreshPeriods } = usePeriods(coupleId);
-  const { reminders, addReminder, toggleReminder, deleteReminder } = useReminders(coupleId, userId);
+  const {
+    complaints,
+    addComplaint,
+    addReply,
+    setStatus: setComplaintStatus,
+    deleteComplaint,
+    repliesFor,
+  } = useComplaints(coupleId, userId);
   const {
     myLocation,
     partnerLocation,
@@ -249,12 +380,8 @@ export default function App() {
     stopSharing: stopLocationSharing,
   } = useLocation(coupleId, userId);
   const welcomeAnim = useRef(new Animated.Value(0)).current;
-  const alarmsRef = useRef(alarms);
-  alarmsRef.current = alarms;
-  // Only nag about un-armed alarms once per app session.
-  const alarmBlockPromptedRef = useRef(false);
-  const remindersRef = useRef(reminders);
-  remindersRef.current = reminders;
+  const todosRef = useRef(todos);
+  todosRef.current = todos;
 
   // Side drawer & settings states
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -345,109 +472,27 @@ export default function App() {
   const [flowLevel, setFlowLevel] = useState<'light' | 'medium' | 'heavy'>('light');
   const [ovulationMucus, setOvulationMucus] = useState<'dry' | 'sticky' | 'creamy' | 'fertile'>('dry');
 
-  // Ringing & Clock Fallback States/Refs
-  const [ringingAlarm, setRingingAlarm] = useState<Alarm | null>(null);
-  const [ringingReminder, setRingingReminder] = useState<Reminder | null>(null);
-  const lastRungTimeRef = useRef<string | null>(null);
-  // Alarm id captured from a cold launch (app opened by tapping the alarm),
-  // resolved to the branded ringing screen once the alarm list has loaded.
-  const [pendingAlarmId, setPendingAlarmId] = useState<string | null>(null);
-
-  const handleIncomingRingingKey = (key: string) => {
-    if (!coupleId) return;
-    if (key.startsWith(`alarm:${coupleId}:`)) {
-      const alarmId = key.replace(`alarm:${coupleId}:`, '');
-      const matchedAlarm = alarms.find((a) => a.id === alarmId);
-      if (matchedAlarm && matchedAlarm.is_enabled) {
-        setRingingAlarm(matchedAlarm);
-      }
-    } else if (key.startsWith(`reminder-alarm:${coupleId}:`)) {
-      const reminderId = key.replace(`reminder-alarm:${coupleId}:`, '');
-      const matchedReminder = reminders.find((r) => r.id === reminderId);
-      if (matchedReminder && !matchedReminder.is_completed) {
-        setRingingReminder(matchedReminder);
-      }
-    }
-  };
-
+  // Tapping a NOVIA notification jumps to the relevant screen.
   useEffect(() => {
-    const foregroundSubscription = Notifications.addNotificationReceivedListener((notification) => {
-      const data = notification.request.content.data;
-      if (data && typeof data.reminderKey === 'string') {
-        handleIncomingRingingKey(data.reminderKey);
-      }
-    });
-
+    const routeFromData = (data: any) => {
+      if (!data) return;
+      if (data.kind === 'todo') setActiveTab('todos');
+      else if (data.kind === 'complaint') setActiveTab('complaints');
+      else if (data.kind === 'update') { setIsSettingsVisible(true); markUpdatesViewed(); }
+    };
     const responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = response.notification.request.content.data;
-      if (data && typeof data.reminderKey === 'string') {
-        handleIncomingRingingKey(data.reminderKey);
-      }
+      routeFromData(response.notification.request.content.data);
     });
-
     return () => {
-      foregroundSubscription.remove();
       responseSubscription.remove();
     };
-  }, [alarms, reminders, coupleId]);
-
-  // NOTE: The old 5-second setInterval clock poll was removed for battery.
-  // Wake-up alarms now fire via notifee OS-level triggers (foreground handler
-  // surfaces the in-app modal), and routine reminders surface via the
-  // expo-notifications received/response listeners above.
-
-  const handleSnoozeAlarm = async () => {
-    if (!ringingAlarm || !userKey) return;
-    const alarmId = ringingAlarm.id;
-    const now = new Date();
-    const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    lastRungTimeRef.current = `alarm:${alarmId}:${hhmm}:${now.toLocaleDateString()}`;
-
-    // Silence the notifee alarm that surfaced this modal, then snooze in DB.
-    await stopRingingAlarm().catch(() => {});
-    setRingingAlarm(null);
-    await triggerAlarmSnooze(alarmId, userKey);
-  };
-
-  const handleDismissAlarm = async () => {
-    if (!ringingAlarm || !userKey) return;
-    const alarmId = ringingAlarm.id;
-    const now = new Date();
-    const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    lastRungTimeRef.current = `alarm:${alarmId}:${hhmm}:${now.toLocaleDateString()}`;
-
-    // Silence the notifee alarm that surfaced this modal, then dismiss in DB.
-    await stopRingingAlarm().catch(() => {});
-    setRingingAlarm(null);
-    await dismissAlarm(alarmId, userKey);
-  };
-
-  const handleCompleteReminder = async () => {
-    if (!ringingReminder) return;
-    const remId = ringingReminder.id;
-    const now = new Date();
-    const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    lastRungTimeRef.current = `reminder:${remId}:${hhmm}:${now.toLocaleDateString()}`;
-
-    setRingingReminder(null);
-    await toggleReminder(remId, true);
-  };
-
-  const handleDismissReminder = () => {
-    if (!ringingReminder) return;
-    const remId = ringingReminder.id;
-    const now = new Date();
-    const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    lastRungTimeRef.current = `reminder:${remId}:${hhmm}:${now.toLocaleDateString()}`;
-
-    setRingingReminder(null);
-  };
+  }, []);
 
   // Calendar states
   const [isCalendarVisible, setIsCalendarVisible] = useState(false);
-  const [calendarTarget, setCalendarTarget] = useState<'periodStartDate' | 'periodEndDate' | 'hospitalDate' | 'financeDueDate' | null>(null);
+  const [calendarTarget, setCalendarTarget] = useState<'periodStartDate' | 'periodEndDate' | 'hospitalDate' | 'financeDueDate' | 'todoDate' | null>(null);
 
-  const openCalendarFor = (target: 'periodStartDate' | 'periodEndDate' | 'hospitalDate' | 'financeDueDate') => {
+  const openCalendarFor = (target: 'periodStartDate' | 'periodEndDate' | 'hospitalDate' | 'financeDueDate' | 'todoDate') => {
     setCalendarTarget(target);
     setIsCalendarVisible(true);
   };
@@ -457,6 +502,7 @@ export default function App() {
     else if (calendarTarget === 'periodEndDate') setPeriodEndDate(dateString);
     else if (calendarTarget === 'hospitalDate') setHospitalDate(dateString);
     else if (calendarTarget === 'financeDueDate') setFinanceDueDate(dateString);
+    else if (calendarTarget === 'todoDate') setTodoDate(dateString);
     setIsCalendarVisible(false);
     setCalendarTarget(null);
   };
@@ -468,21 +514,31 @@ export default function App() {
   const [gfEmotion, setGfEmotion] = useState<'calm' | 'irritable' | 'sad' | 'anxious' | 'happy'>('calm');
   const [gfEnergy, setGfEnergy] = useState<'low' | 'normal' | 'stressed' | 'high'>('normal');
 
-  // Reminders input
-  const [newReminderTitle, setNewReminderTitle] = useState('');
+  // Todo creator inputs
+  const [newTodoTitle, setNewTodoTitle] = useState('');
+  const [newTodoNotes, setNewTodoNotes] = useState('');
+  const [todoHour, setTodoHour] = useState(9);
+  const [todoMinute, setTodoMinute] = useState(0);
+  const [todoDate, setTodoDate] = useState(''); // 'YYYY-MM-DD' first fire date
+  const [todoRecurrence, setTodoRecurrence] = useState<TodoRecurrence>('once');
 
-  // Reminder Alarm states
-  const [reminderHasAlarm, setReminderHasAlarm] = useState(false);
-  const [reminderAlarmHour, setReminderAlarmHour] = useState(18);
-  const [reminderAlarmMinute, setReminderAlarmMinute] = useState(30);
-
-  const adjustReminderAlarmUnit = (unit: 'hour' | 'minute', amount: number) => {
+  const adjustTodoTime = (unit: 'hour' | 'minute', amount: number) => {
     if (unit === 'hour') {
-      setReminderAlarmHour((current) => (current + amount + 24) % 24);
+      setTodoHour((current) => (current + amount + 24) % 24);
       return;
     }
-    setReminderAlarmMinute((current) => (current + amount + 60) % 60);
+    setTodoMinute((current) => (current + amount + 60) % 60);
   };
+
+  // Complaint Box inputs
+  const [newComplaintTitle, setNewComplaintTitle] = useState('');
+  const [newComplaintBody, setNewComplaintBody] = useState('');
+  const [openComplaintId, setOpenComplaintId] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState('');
+
+  // Updates / changelog
+  const [appUpdates, setAppUpdates] = useState<AppUpdate[]>([]);
+  const [hasUnseenUpdate, setHasUnseenUpdate] = useState(false);
 
   // Medical Record Vault
   const [medLogs, setMedLogs] = useState<any[]>([]);
@@ -493,122 +549,27 @@ export default function App() {
   // Finance borrowing lender direction state
   const [financeLenderDirection, setFinanceLenderDirection] = useState<'me' | 'partner'>('me');
 
-  // Alarm creator
-  const [isAlarmCreatorOpen, setIsAlarmCreatorOpen] = useState(false);
-  const [alarmHour, setAlarmHour] = useState(8);
-  const [alarmMinute, setAlarmMinute] = useState(30);
-  const [alarmDays, setAlarmDays] = useState<number[]>([1, 2, 3, 4, 5]);
-  const [alarmSyncMode, setAlarmSyncMode] = useState<'simultaneous' | 'coordinated'>('simultaneous');
-  const [alarmPurpose, setAlarmPurpose] = useState('');
-  const [editingAlarmId, setEditingAlarmId] = useState<string | null>(null);
-
-  const openNewAlarmCreator = () => {
-    setEditingAlarmId(null);
-    setAlarmPurpose('');
-    setAlarmHour(8);
-    setAlarmMinute(30);
-    setAlarmDays([1, 2, 3, 4, 5]);
-    setAlarmSyncMode('simultaneous');
-    setIsAlarmCreatorOpen((open) => !open);
-  };
-
-  // Configure background notifications upon login
+  // Configure notification permissions + channels upon login.
   useEffect(() => {
     if (session) {
-      configureNotificationsAsync().then(() => {
-        checkDndBypass();
-      });
-      // Prepare the high-priority notifee alarm channel + request exact-alarm /
-      // full-screen-intent permissions used by the reliable wake-up alarms.
-      setupAlarmChannel();
-      requestAlarmPermissions();
+      configureNotificationsAsync();
     }
   }, [session]);
 
-  // If we tried to schedule alarms but the OS armed none of them (permission
-  // revoked, or the app was killed/optimised), tell the user once and offer the
-  // fix rather than letting the alarm silently never ring.
-  useEffect(() => {
-    if (!alarmsBlocked || alarmBlockPromptedRef.current) return;
-    alarmBlockPromptedRef.current = true;
-    Alert.alert(
-      'Alarms may not ring',
-      'Your alarms are saved, but Android would not arm them. This is usually the "Alarms & reminders" permission or battery optimisation blocking NOVIA.',
-      [
-        { text: 'Dismiss', style: 'cancel' },
-        { text: 'Fix now', onPress: () => promptExactAlarmPermission() },
-      ],
-    );
-  }, [alarmsBlocked]);
-
-  // Run once on launch: apply any OTA update, register the notifee foreground
-  // handler (shows the branded ringing screen while the app is open), and check
-  // whether the app was cold-launched by tapping an alarm's full-screen intent.
+  // Apply any OTA (EAS) JS update once on launch.
   useEffect(() => {
     checkAndApplyUpdate();
-
-    const unsubscribe = registerAlarmForegroundHandler((alarmId) => {
-      const matched = alarmsRef.current.find((a) => a.id === alarmId);
-      if (matched && matched.is_enabled) {
-        setRingingAlarm(matched);
-      } else if (alarmId) {
-        setPendingAlarmId(alarmId);
-      }
-    });
-
-    notifee.getInitialNotification().then((initial) => {
-      const data = initial?.notification?.data;
-      if (data?.kind === 'alarm' && typeof data.alarmId === 'string') {
-        setPendingAlarmId(data.alarmId);
-      }
-    });
-
-    return () => {
-      unsubscribe();
-    };
   }, []);
 
-  // Once alarms are loaded, resolve a pending (cold-launch) alarm to the
-  // branded ringing screen with its reason/purpose.
+  // Roll the daily-vocabulary window forward whenever the app returns to the
+  // foreground (the vocab scheduling effect keys off this tick).
+  const [foregroundTick, setForegroundTick] = useState(0);
   useEffect(() => {
-    if (!pendingAlarmId) return;
-    const matched = alarms.find((a) => a.id === pendingAlarmId);
-    if (matched && matched.is_enabled) {
-      setRingingAlarm(matched);
-      setPendingAlarmId(null);
-    }
-  }, [pendingAlarmId, alarms]);
-
-  useEffect(() => {
-    checkDndBypass();
     const subscription = AppState.addEventListener('change', (nextAppState) => {
-      if (nextAppState === 'active') {
-        checkDndBypass();
-        // Roll the alarm scheduling window forward each time the app is opened.
-        syncCoupleAlarms(alarmsRef.current).catch((e) =>
-          console.error('[Alarms] Foreground re-sync failed:', e),
-        );
-        // If the app was brought to the front by a ringing alarm's full-screen
-        // intent (warm resume from the lock screen), getInitialNotification
-        // won't fire — read the still-displayed alarm notification and surface
-        // the branded ringing screen ourselves.
-        getActiveRingingAlarmId()
-          .then((alarmId) => {
-            if (alarmId) setPendingAlarmId(alarmId);
-          })
-          .catch(() => {});
-      }
+      if (nextAppState === 'active') setForegroundTick((t) => t + 1);
     });
-    return () => {
-      subscription.remove();
-    };
+    return () => subscription.remove();
   }, []);
-
-  useEffect(() => {
-    if (activeTab === 'alarms') {
-      checkDndBypass();
-    }
-  }, [activeTab]);
 
   useEffect(() => {
     if (!session || !coupleId) return;
@@ -621,46 +582,6 @@ export default function App() {
       useNativeDriver: true,
     }).start();
   }, [session, coupleId, welcomeAnim]);
-
-  const prevPunishmentsRef = useRef<any[]>([]);
-
-  useEffect(() => {
-    if (!session || !coupleId || !userId) return;
-
-    // Filter active punishments
-    const currentActive = activePunishments.filter(p => p.is_active);
-    const prevActive = prevPunishmentsRef.current;
-
-    // Find any punishment that is in currentActive but was not in prevActive
-    const newlyAdded = currentActive.filter(
-      curr => !prevActive.some(prev => prev.id === curr.id)
-    );
-
-    newlyAdded.forEach(newPunishment => {
-      const isOffender = newPunishment.offender_id === userId;
-      const penaltyTitle = isOffender ? "PUNISHMENT ASSIGNED" : "PARTNER PENALIZED";
-      const offenderName = isOffender ? "You" : (partnerProfile?.display_name || partnerName || "Your partner");
-      const penaltyMsg = isOffender 
-        ? `You have been assigned a punishment!\n\nPenalty: ${newPunishment.penalty_type.toUpperCase()}\nDescription: ${newPunishment.description}`
-        : `${offenderName} has been assigned a punishment!\n\nPenalty: ${newPunishment.penalty_type.toUpperCase()}\nDescription: ${newPunishment.description}`;
-
-      // 1. Show in-app alert
-      Alert.alert(penaltyTitle, penaltyMsg, [{ text: "Acknowledged" }]);
-
-      // 2. Trigger local notification
-      scheduleLocalNotification({
-        title: penaltyTitle,
-        body: isOffender 
-          ? `You got a ${newPunishment.penalty_type} punishment: ${newPunishment.description}` 
-          : `${offenderName} got a ${newPunishment.penalty_type} punishment: ${newPunishment.description}`,
-        trigger: { seconds: 1 } as any,
-        channelId: 'reminders-channel',
-      });
-    });
-
-    // Update ref
-    prevPunishmentsRef.current = currentActive;
-  }, [activePunishments, session, coupleId, userId, partnerName, partnerProfile]);
 
   const getCreatorName = (creatorId?: string | null) => {
     if (!creatorId) return 'User';
@@ -794,46 +715,124 @@ export default function App() {
     scheduleCycleReminder();
   }, [predictions, coupleId]);
 
-  // Synchronize daily alarms for self-care routine reminders
+  // Schedule a local reminder for every open todo. Because todos are shared and
+  // each device schedules from the same list, both partners get reminded.
   useEffect(() => {
-    const syncReminderAlarms = async () => {
+    const syncTodoReminders = async () => {
       if (!coupleId) return;
 
-      // Cancel all existing scheduled notifications for reminder alarm prefix
-      await cancelScheduledNotificationsByPrefix(`reminder-alarm:${coupleId}:`);
+      await cancelScheduledNotificationsByPrefix(`todo:${coupleId}:`);
 
-      // Schedule active daily reminders with alarms
       await Promise.all(
-        reminders
-          .filter((rem) => {
-            const meta = rem.metadata as any;
-            return !rem.is_completed && meta?.has_alarm && meta?.alarm_time;
-          })
-          .map((rem) => {
-            const meta = rem.metadata as any;
-            const timeStr = meta.alarm_time; // "HH:MM"
-            const [hour, minute] = timeStr.split(':').map(Number);
-            if (isNaN(hour) || isNaN(minute)) return null;
+        todos
+          .filter((t) => !t.is_completed)
+          .map((t) => {
+            const due = new Date(t.due_at);
+            if (isNaN(due.getTime())) return null;
+            const hour = due.getHours();
+            const minute = due.getMinutes();
 
+            let trigger: any;
+            if (t.recurrence === 'weekly') {
+              trigger = { type: Notifications.SchedulableTriggerInputTypes.WEEKLY, weekday: due.getDay() + 1, hour, minute };
+            } else if (t.recurrence === 'monthly') {
+              trigger = { type: Notifications.SchedulableTriggerInputTypes.MONTHLY, day: due.getDate(), hour, minute };
+            } else if (t.recurrence === 'yearly') {
+              trigger = { type: Notifications.SchedulableTriggerInputTypes.YEARLY, month: due.getMonth() + 1, day: due.getDate(), hour, minute };
+            } else {
+              if (due.getTime() <= Date.now()) return null; // one-off already passed
+              trigger = due;
+            }
+
+            const recurrenceLabel = t.recurrence === 'once' ? '' : ` (${t.recurrence})`;
             return scheduleLocalNotification({
-              title: `ROUTINE: ${rem.title.toUpperCase()}`,
-              body: `It's time for your daily routine reminder. Don't forget to cross it off.`,
-              trigger: {
-                hour,
-                minute,
-                repeats: true,
-              } as any,
-              channelId: 'alarm-channel-v2', // High priority channel
-              data: {
-                reminderKey: `reminder-alarm:${coupleId}:${rem.id}`
-              }
+              title: `TODO: ${t.title.toUpperCase()}`,
+              body: `Reminder${recurrenceLabel} — ${t.title}. Tap to open your shared list.`,
+              trigger,
+              channelId: PRIORITY_CHANNEL,
+              data: { kind: 'todo', reminderKey: `todo:${coupleId}:${t.id}` },
             });
           })
       );
     };
 
-    syncReminderAlarms();
-  }, [reminders, coupleId]);
+    syncTodoReminders();
+  }, [todos, coupleId]);
+
+  // Daily vocabulary: schedule the next 14 days of one-shot notifications, each
+  // carrying that day's specific word. Rolls forward on foreground (foregroundTick).
+  useEffect(() => {
+    if (!session) return;
+    const scheduleVocab = async () => {
+      await cancelScheduledNotificationsByPrefix('vocab:');
+      const AT_HOUR = 9;
+      const now = new Date();
+      const tasks: Promise<any>[] = [];
+      for (let i = 0; i < 14; i++) {
+        const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i, AT_HOUR, 0, 0, 0);
+        if (day.getTime() <= Date.now()) continue;
+        const w = getWordOfDay(day);
+        tasks.push(
+          scheduleLocalNotification({
+            title: `Word of the Day: ${w.word}`,
+            body: `${w.meaning}${w.example ? `  e.g. ${w.example}` : ''}`,
+            trigger: day as any,
+            channelId: PRIORITY_CHANNEL,
+            data: { kind: 'vocab', reminderKey: `vocab:${day.toDateString()}` },
+          })
+        );
+      }
+      await Promise.all(tasks);
+    };
+    scheduleVocab();
+  }, [session, foregroundTick]);
+
+  // Fetch the changelog; if there are entries newer than the user has seen, drop
+  // an "update available" notification. First run silently baselines.
+  useEffect(() => {
+    if (!session) return;
+    const run = async () => {
+      const [list, lastSeen] = await Promise.all([fetchAppUpdates(), getLastSeenUpdateAt()]);
+      setAppUpdates(list);
+      if (list.length === 0) return;
+      if (!lastSeen) {
+        await markUpdatesSeen(list[0].created_at); // baseline, no notification
+        return;
+      }
+      const unseen = unseenUpdates(list, lastSeen);
+      if (unseen.length > 0) {
+        setHasUnseenUpdate(true);
+        const latest = unseen[0];
+        await scheduleLocalNotification({
+          title: 'NOVIA update available',
+          body: `${latest.version} — ${latest.title}`,
+          trigger: { seconds: 1 } as any,
+          channelId: PRIORITY_CHANNEL,
+          data: { kind: 'update' },
+        });
+      }
+    };
+    run();
+  }, [session, foregroundTick]);
+
+  // Live-refresh the changelog when a new update row is inserted.
+  useEffect(() => {
+    if (!session) return;
+    const channel = supabase
+      .channel('app-updates-sync')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'app_updates' }, () =>
+        setForegroundTick((t) => t + 1)
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [session]);
+
+  const markUpdatesViewed = async () => {
+    if (appUpdates.length > 0) await markUpdatesSeen(appUpdates[0].created_at);
+    setHasUnseenUpdate(false);
+  };
 
   // Offline first aid query parser
   const handleFirstAidSearch = (text: string) => {
@@ -1086,61 +1085,83 @@ export default function App() {
     fetchHospitalVisits();
   };
 
-  const adjustAlarmUnit = (unit: 'hour' | 'minute', amount: number) => {
-    if (unit === 'hour') {
-      setAlarmHour((current) => (current + amount + 24) % 24);
+  // ---- Todo handlers -------------------------------------------------------
+  const handleAddTodo = async () => {
+    if (!newTodoTitle.trim()) {
+      Alert.alert('Title needed', 'Give your todo a title first.');
       return;
     }
+    // Build the first-fire timestamp from the picked date (default today) + time.
+    const base = todoDate ? new Date(`${todoDate}T00:00:00`) : new Date();
+    base.setHours(todoHour, todoMinute, 0, 0);
 
-    setAlarmMinute((current) => (current + amount + 60) % 60);
-  };
-
-  const toggleAlarmDay = (day: number) => {
-    setAlarmDays((current) => {
-      if (current.includes(day)) {
-        return current.filter((activeDay) => activeDay !== day);
-      }
-      return [...current, day].sort((a, b) => a - b);
-    });
-  };
-
-  const handleCreateAlarm = async () => {
-    if (alarmDays.length === 0) {
-      Alert.alert("Choose days", "Select at least one day for this alarm.");
-      return;
-    }
-
-    const created = await addAlarm({
-      alarmId: editingAlarmId || undefined,
-      hour: alarmHour,
-      minute: alarmMinute,
-      daysActive: alarmDays,
-      syncMode: alarmSyncMode,
-      purpose: alarmPurpose,
+    const created = await addTodo({
+      title: newTodoTitle,
+      notes: newTodoNotes,
+      dueAt: base,
+      recurrence: todoRecurrence,
     });
 
     if (!created) {
-      Alert.alert("Alarm not saved", "NOVIA could not create this alarm. Please check Supabase connectivity.");
+      Alert.alert('Todo not saved', 'NOVIA could not save this todo. Please check connectivity.');
       return;
     }
 
-    setIsAlarmCreatorOpen(false);
-    setEditingAlarmId(null);
-    setAlarmPurpose('');
+    setNewTodoTitle('');
+    setNewTodoNotes('');
+    setTodoDate('');
+    setTodoHour(9);
+    setTodoMinute(0);
+    setTodoRecurrence('once');
   };
 
-  const handleEditAlarm = (alarm: any) => {
-    const [hour, minute] = alarm.alarm_time.split(':').map(Number);
-    setEditingAlarmId(alarm.id);
-    setAlarmHour(hour);
-    setAlarmMinute(minute);
-    setAlarmDays(alarm.days_active || []);
-    setAlarmSyncMode(alarm.sync_mode);
-    setAlarmPurpose(alarm.purpose || '');
-    setIsAlarmCreatorOpen(true);
+  // ---- Complaint handlers --------------------------------------------------
+  const handleAddComplaint = async () => {
+    if (!newComplaintTitle.trim()) {
+      Alert.alert('Title needed', 'Give your complaint a short title.');
+      return;
+    }
+    const created = await addComplaint(newComplaintTitle, newComplaintBody);
+    if (!created) {
+      Alert.alert('Not saved', 'NOVIA could not file this complaint. Please check connectivity.');
+      return;
+    }
+    setNewComplaintTitle('');
+    setNewComplaintBody('');
   };
 
-  const formatAlarmPreview = `${String(alarmHour).padStart(2, '0')}:${String(alarmMinute).padStart(2, '0')}`;
+  const handleAddReply = async (complaintId: string) => {
+    if (!replyText.trim()) return;
+    const created = await addReply(complaintId, replyText);
+    if (created) setReplyText('');
+  };
+
+  // Notify me when my partner files a complaint or replies to a thread.
+  const prevComplaintIdsRef = useRef<Set<string>>(new Set());
+  const complaintsBaselinedRef = useRef(false);
+  useEffect(() => {
+    if (!userId) return;
+    const currentIds = new Set(complaints.map((c) => c.id));
+    if (!complaintsBaselinedRef.current) {
+      prevComplaintIdsRef.current = currentIds;
+      complaintsBaselinedRef.current = true;
+      return;
+    }
+    complaints.forEach((c) => {
+      if (!prevComplaintIdsRef.current.has(c.id) && c.created_by !== userId) {
+        const from = c.created_by === partnerProfile?.id ? (partnerProfile?.display_name || partnerName || 'Your partner') : 'Your partner';
+        scheduleLocalNotification({
+          title: 'New complaint filed',
+          body: `${from}: ${c.title}`,
+          trigger: { seconds: 1 } as any,
+          channelId: PRIORITY_CHANNEL,
+          data: { kind: 'complaint' },
+        });
+      }
+    });
+    prevComplaintIdsRef.current = currentIds;
+  }, [complaints, userId, partnerProfile, partnerName]);
+
   const welcomeName = profile?.display_name || session?.user?.email?.split('@')[0] || 'there';
   const relationshipAdvice = (() => {
     const partnerNameVal = partnerProfile?.display_name || partnerName || 'your partner';
@@ -1287,9 +1308,6 @@ export default function App() {
     );
   }
 
-  // Visual restriction punishment block
-  const hasVisualRestriction = activePunishments.some(p => p.penalty_type === 'visual_restriction' && p.offender_id === userId);
-
   return (
     <View style={styles.appShell}>
       <SpaceBackdrop />
@@ -1420,27 +1438,6 @@ export default function App() {
         </SafeAreaView>
       ) : (
         <View style={{ flex: 1 }}>
-          {hasVisualRestriction ? (
-            <SafeAreaView style={{ flex: 1 }}>
-            <View style={styles.punishmentOverlay}>
-              <Text style={styles.punishTitle}>ACCESS SUSPENDED</Text>
-              <Text style={styles.punishDescription}>
-                You have skipped alarm wakes or missed loan repayments. The automated discipline engine has locked your client panel.
-              </Text>
-              <View style={styles.penaltyCard}>
-                <Text style={styles.penaltyText}>
-                  Active Penalty: {activePunishments[0]?.description || "Restrictive Penance status active."}
-                </Text>
-              </View>
-              <TouchableOpacity 
-                style={styles.resolveButton}
-                onPress={() => resolvePunishment(activePunishments[0].id)}
-              >
-                <Text style={styles.resolveBtnText}>Request Partner Unlock / Override</Text>
-              </TouchableOpacity>
-            </View>
-            </SafeAreaView>
-          ) : (
             <SafeAreaView style={{ flex: 1 }}>
               <TouchableOpacity 
                 style={styles.floatingMenuButton} 
@@ -1462,6 +1459,7 @@ export default function App() {
                   }}
                   keyboardShouldPersistTaps="handled"
                 >
+                <ScreenTransition key={activeTab}>
                 {/* Main Hub Tab */}
                 {activeTab === 'hub' && (
                   <View style={styles.tabContent}>
@@ -1508,7 +1506,41 @@ export default function App() {
                       </View>
                     </View>
 
+                    {/* Quick navigation cards */}
+                    <View style={styles.navGrid}>
+                      <TouchableOpacity style={styles.navCard} onPress={() => setActiveTab('todos')} activeOpacity={0.85}>
+                        <ListChecks size={26} color="#F18F2E" strokeWidth={2} />
+                        <Text style={styles.navCardLabel}>Todo List</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.navCard} onPress={() => setActiveTab('complaints')} activeOpacity={0.85}>
+                        <MessageSquareWarning size={26} color="#F18F2E" strokeWidth={2} />
+                        <Text style={styles.navCardLabel}>Complaint Box</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.navCard} onPress={() => setActiveTab('bucket')} activeOpacity={0.85}>
+                        <Text style={{ fontSize: 26 }}>🪣</Text>
+                        <Text style={styles.navCardLabel}>Bucket List</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.navCard} onPress={() => setActiveTab('location')} activeOpacity={0.85}>
+                        <MapPin size={26} color="#F18F2E" strokeWidth={2} />
+                        <Text style={styles.navCardLabel}>Location</Text>
+                      </TouchableOpacity>
+                    </View>
 
+                    {/* Word of the Day */}
+                    {(() => {
+                      const w = getWordOfDay();
+                      return (
+                        <View style={styles.sectionCard}>
+                          <View style={styles.rowBetween}>
+                            <Text style={styles.sectionHeading}>WORD OF THE DAY</Text>
+                            <BookOpen size={16} color="#F18F2E" />
+                          </View>
+                          <Text style={styles.vocabWord}>{w.word}</Text>
+                          <Text style={styles.vocabMeaning}>{w.meaning}</Text>
+                          {w.example ? <Text style={styles.vocabExample}>“{w.example}”</Text> : null}
+                        </View>
+                      );
+                    })()}
 
                     {/* Mood Selector Updates */}
                     <View style={styles.sectionCard}>
@@ -1519,7 +1551,7 @@ export default function App() {
                             key={m}
                             style={[
                               styles.moodBtn,
-                              currentMood === m && { borderColor: THEME.colors.primary, borderWidth: 1 }
+                              currentMood === m && { backgroundColor: THEME.glass.accentStrong, ...THEME.shadow.glowAccent }
                             ]}
                             onPress={() => updateMood(m)}
                           >
@@ -1565,6 +1597,10 @@ export default function App() {
                 {/* Location Sharing Tab */}
                 {activeTab === 'location' && (
                   <View style={styles.tabContent}>
+                    <TouchableOpacity style={styles.backRow} onPress={() => setActiveTab('hub')}>
+                      <ChevronLeft size={20} color="#F18F2E" />
+                      <Text style={styles.backRowText}>Hub</Text>
+                    </TouchableOpacity>
                     {/* Partner's shared location */}
                     <View style={styles.sectionCard}>
                       <Text style={styles.sectionHeading}>
@@ -1705,422 +1741,274 @@ export default function App() {
                   </View>
                 )}
 
-                {/* Waking & Alarms Tab */}
-                {activeTab === 'alarms' && (
+                {/* Shared Todo List (Hub sub-screen) */}
+                {activeTab === 'todos' && (
                   <View style={styles.tabContent}>
-                    <View style={styles.alarmHeaderRow}>
-                      <View>
-                        <Text style={styles.sectionTitle}>Coordinated Alarms</Text>
-                        {Platform.OS === 'android' ? (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
-                            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isDndBypassGranted ? '#2ECC71' : '#FF8A00', marginRight: 6 }} />
-                            <Text style={{ color: isDndBypassGranted ? '#2ECC71' : '#FF8A00', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 }}>
-                              {isDndBypassGranted ? 'SYSTEM STATUS: FULLY OPTIMIZED' : 'ATTENTION: SYSTEM SETUP REQUIRED'}
-                            </Text>
-                          </View>
-                        ) : (
-                          <Text style={styles.alarmHeaderSub}>Create synchronized reminders together.</Text>
-                        )}
+                    <TouchableOpacity style={styles.backRow} onPress={() => setActiveTab('hub')}>
+                      <ChevronLeft size={20} color="#F18F2E" />
+                      <Text style={styles.backRowText}>Hub</Text>
+                    </TouchableOpacity>
+
+                    <View style={styles.sectionCard}>
+                      <Text style={styles.sectionHeading}>NEW SHARED TODO</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="What needs doing?"
+                        placeholderTextColor="#666"
+                        value={newTodoTitle}
+                        onChangeText={setNewTodoTitle}
+                      />
+                      <TextInput
+                        style={[styles.input, { height: 60, textAlignVertical: 'top' }]}
+                        placeholder="Notes (optional)"
+                        placeholderTextColor="#666"
+                        value={newTodoNotes}
+                        onChangeText={setNewTodoNotes}
+                        multiline
+                      />
+
+                      <View style={[styles.rowBetween, { marginBottom: 10 }]}>
+                        <Text style={styles.inputLabel}>FIRST REMINDER DATE</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          {todoDate ? (
+                            <TouchableOpacity onPress={() => setTodoDate('')} style={{ marginRight: 10 }}>
+                              <Text style={{ color: '#E74627', fontSize: 12, fontWeight: '700' }}>Clear</Text>
+                            </TouchableOpacity>
+                          ) : null}
+                          <TouchableOpacity style={styles.reminderDateButton} onPress={() => openCalendarFor('todoDate')}>
+                            <Text style={styles.reminderDateButtonText}>{todoDate || 'Today'}</Text>
+                          </TouchableOpacity>
+                        </View>
                       </View>
-                      <TouchableOpacity
-                        style={styles.addAlarmButton}
-                        onPress={openNewAlarmCreator}
-                      >
-                        <Text style={styles.addAlarmButtonText}>{isAlarmCreatorOpen ? 'Close' : '+ Alarm'}</Text>
+
+                      <Text style={[styles.inputLabel, { marginBottom: 8 }]}>REMINDER TIME</Text>
+                      <View style={styles.spinnerRow}>
+                        <View style={styles.spinnerPanel}>
+                          <TouchableOpacity style={styles.spinnerButton} onPress={() => adjustTodoTime('hour', 1)}>
+                            <Text style={styles.spinnerButtonText}>+</Text>
+                          </TouchableOpacity>
+                          <Text style={styles.spinnerValue}>{String(todoHour).padStart(2, '0')}</Text>
+                          <Text style={styles.spinnerLabel}>HOUR</Text>
+                          <TouchableOpacity style={styles.spinnerButton} onPress={() => adjustTodoTime('hour', -1)}>
+                            <Text style={styles.spinnerButtonText}>-</Text>
+                          </TouchableOpacity>
+                        </View>
+                        <View style={styles.spinnerDivider}>
+                          <Text style={styles.spinnerColon}>:</Text>
+                        </View>
+                        <View style={styles.spinnerPanel}>
+                          <TouchableOpacity style={styles.spinnerButton} onPress={() => adjustTodoTime('minute', 5)}>
+                            <Text style={styles.spinnerButtonText}>+</Text>
+                          </TouchableOpacity>
+                          <Text style={styles.spinnerValue}>{String(todoMinute).padStart(2, '0')}</Text>
+                          <Text style={styles.spinnerLabel}>MIN</Text>
+                          <TouchableOpacity style={styles.spinnerButton} onPress={() => adjustTodoTime('minute', -5)}>
+                            <Text style={styles.spinnerButtonText}>-</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+
+                      <Text style={[styles.inputLabel, { marginTop: 14, marginBottom: 8 }]}>REPEAT</Text>
+                      <View style={styles.chipsRow}>
+                        {(['once', 'weekly', 'monthly', 'yearly'] as TodoRecurrence[]).map((r) => (
+                          <TouchableOpacity
+                            key={r}
+                            style={[styles.quickAddChip, todoRecurrence === r && { backgroundColor: THEME.glass.accentStrong, ...THEME.shadow.glowAccent }]}
+                            onPress={() => setTodoRecurrence(r)}
+                          >
+                            <Text style={styles.quickAddChipText}>
+                              {r === 'once' ? 'Once' : r === 'weekly' ? 'Weekly' : r === 'monthly' ? 'Monthly' : 'Yearly'}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      <TouchableOpacity style={[styles.primaryButton, { marginTop: 16 }]} onPress={handleAddTodo}>
+                        <Text style={styles.primaryBtnText}>ADD TODO</Text>
                       </TouchableOpacity>
                     </View>
 
-                    {isAlarmCreatorOpen && (
-                      <View style={styles.alarmCreatorCard}>
-                        <Text style={styles.sectionHeading}>{editingAlarmId ? 'EDIT ALARM' : 'ADD ALARM'}</Text>
-                        <Text style={styles.alarmPreview}>{formatAlarmPreview}</Text>
-                        <TextInput
-                          style={styles.input}
-                          placeholder="Purpose or description..."
-                          placeholderTextColor="#666"
-                          value={alarmPurpose}
-                          onChangeText={setAlarmPurpose}
-                        />
-
-                        <View style={styles.spinnerRow}>
-                          <View style={styles.spinnerPanel}>
-                            <TouchableOpacity style={styles.spinnerButton} onPress={() => adjustAlarmUnit('hour', 1)}>
-                              <Text style={styles.spinnerButtonText}>+</Text>
-                            </TouchableOpacity>
-                            <Text style={styles.spinnerValue}>{String(alarmHour).padStart(2, '0')}</Text>
-                            <Text style={styles.spinnerLabel}>HOUR</Text>
-                            <TouchableOpacity style={styles.spinnerButton} onPress={() => adjustAlarmUnit('hour', -1)}>
-                              <Text style={styles.spinnerButtonText}>-</Text>
-                            </TouchableOpacity>
-                          </View>
-
-                          <View style={styles.spinnerDivider}>
-                            <Text style={styles.spinnerColon}>:</Text>
-                          </View>
-
-                          <View style={styles.spinnerPanel}>
-                            <TouchableOpacity style={styles.spinnerButton} onPress={() => adjustAlarmUnit('minute', 5)}>
-                              <Text style={styles.spinnerButtonText}>+</Text>
-                            </TouchableOpacity>
-                            <Text style={styles.spinnerValue}>{String(alarmMinute).padStart(2, '0')}</Text>
-                            <Text style={styles.spinnerLabel}>MIN</Text>
-                            <TouchableOpacity style={styles.spinnerButton} onPress={() => adjustAlarmUnit('minute', -5)}>
-                              <Text style={styles.spinnerButtonText}>-</Text>
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-
-                        <View style={styles.daySelectorRow}>
-                          {DAY_OPTIONS.map((day, index) => {
-                            const selected = alarmDays.includes(index);
-                            return (
-                              <TouchableOpacity
-                                key={`${day}-${index}`}
-                                style={[styles.dayChip, selected && styles.activeDayChip]}
-                                onPress={() => toggleAlarmDay(index)}
-                              >
-                                <Text style={[styles.dayChipText, selected && styles.activeDayChipText]}>{day}</Text>
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </View>
-
-                        <View style={styles.segmentControl}>
-                          {(['simultaneous', 'coordinated'] as const).map((mode) => {
-                            const selected = alarmSyncMode === mode;
-                            return (
-                              <TouchableOpacity
-                                key={mode}
-                                style={[styles.segmentOption, selected && styles.activeSegmentOption]}
-                                onPress={() => setAlarmSyncMode(mode)}
-                              >
-                                <Text style={[styles.segmentText, selected && styles.activeSegmentText]}>
-                                  {mode === 'simultaneous' ? 'Simultaneous' : 'Coordinated'}
-                                </Text>
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </View>
-
-                        <TouchableOpacity style={styles.primaryButton} onPress={handleCreateAlarm}>
-                          <Text style={styles.primaryBtnText}>{editingAlarmId ? 'Save Alarm' : 'Create Alarm'}</Text>
-                        </TouchableOpacity>
-                        {editingAlarmId && (
-                          <TouchableOpacity
-                            style={styles.deleteAlarmButton}
-                            onPress={async () => {
-                              await deleteAlarm(editingAlarmId);
-                              setEditingAlarmId(null);
-                              setIsAlarmCreatorOpen(false);
-                              setAlarmPurpose('');
-                            }}
-                          >
-                            <Text style={styles.deleteAlarmButtonText}>Delete Alarm</Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                    )}
-
-                    {alarms.length === 0 ? (
-                      <View style={styles.emptyCard}>
-                        <Text style={styles.emptyText}>No alarms yet. Add one here to sync it instantly.</Text>
-                      </View>
-                    ) : (
-                      alarms.map((a) => (
-                        <TouchableOpacity 
-                          key={a.id} 
-                          style={styles.alarmRowCard} 
-                          onPress={() => handleEditAlarm(a)} 
-                          activeOpacity={0.82}
-                        >
-                          <View style={{ flex: 1 }}>
-                            <Text style={styles.alarmPurpose}>{a.purpose || 'Coordinated Alarm'}</Text>
-                            <Text style={styles.alarmTime}>{a.alarm_time}</Text>
-                            <Text style={styles.alarmSyncMode}>Sync: {a.sync_mode.toUpperCase()}</Text>
-                            <Text style={styles.alarmDaysText}>Days: {a.days_active.map((day) => DAY_OPTIONS[day]).join(' ') || 'None'}</Text>
-                          </View>
-                          
-                          {/* Elegant Custom Switch Toggle */}
-                          <TouchableOpacity 
-                            activeOpacity={0.8} 
-                            onPress={() => toggleAlarm(a.id, !a.is_enabled)} 
-                            style={{
-                              width: 50,
-                              height: 28,
-                              borderRadius: 14,
-                              backgroundColor: a.is_enabled ? '#FF6B00' : 'rgba(255, 255, 255, 0.08)',
-                              borderWidth: 1.5,
-                              borderColor: a.is_enabled ? '#FF8A00' : 'rgba(255, 107, 0, 0.28)',
-                              justifyContent: 'center',
-                              paddingHorizontal: 3,
-                            }}
-                          >
-                            <View 
-                              style={{
-                                width: 20,
-                                height: 20,
-                                borderRadius: 10,
-                                backgroundColor: a.is_enabled ? '#030202' : '#A9A09A',
-                                alignSelf: a.is_enabled ? 'flex-end' : 'flex-start',
-                              }}
-                            />
-                          </TouchableOpacity>
-                        </TouchableOpacity>
-                      ))
-                    )}
-
-                    {/* Routine & Self-Care Reminders Card */}
                     <View style={styles.sectionCard}>
-                      <Text style={styles.sectionHeading}>ROUTINE &amp; SELF-CARE REMINDERS</Text>
-                      
-                      {/* Quick-Add Chips */}
-                      <View style={styles.chipsRow}>
-                        <TouchableOpacity 
-                          style={styles.quickAddChip} 
-                          onPress={() => addReminder('Face Care', 'face_care', 'daily')}
-                        >
-                          <Text style={styles.quickAddChipText}>+ Face Care</Text>
-                        </TouchableOpacity>
-                      </View>
-
-                      {/* Custom Add Input */}
-                      <View style={styles.addReminderRow}>
-                        <TextInput
-                          style={[styles.input, { flex: 1, marginBottom: 0 }]}
-                          placeholder="Type custom routine..."
-                          placeholderTextColor="#666"
-                          value={newReminderTitle}
-                          onChangeText={setNewReminderTitle}
-                        />
-                        <TouchableOpacity 
-                          style={styles.plusAddButton} 
-                          onPress={async () => {
-                            if (!newReminderTitle.trim()) return;
-                            const metadata = reminderHasAlarm ? { 
-                              has_alarm: true, 
-                              alarm_time: `${String(reminderAlarmHour).padStart(2, '0')}:${String(reminderAlarmMinute).padStart(2, '0')}` 
-                            } : null;
-                            await addReminder(newReminderTitle.trim(), 'habit', 'daily', metadata);
-                            setNewReminderTitle('');
-                            setReminderHasAlarm(false);
-                          }}
-                        >
-                          <Text style={styles.plusAddButtonText}>+</Text>
-                        </TouchableOpacity>
-                      </View>
-
-                      {/* Routine Alarm Configurator */}
-                      <View style={{ marginVertical: 12 }}>
-                        <View style={[styles.rowBetween, { marginBottom: 8 }]}>
-                          <Text style={styles.inputLabel}>SET DAILY ALARM TIME</Text>
-                          <TouchableOpacity 
-                            activeOpacity={0.8} 
-                            onPress={() => setReminderHasAlarm(!reminderHasAlarm)} 
-                            style={{
-                              width: 50,
-                              height: 28,
-                              borderRadius: 14,
-                              backgroundColor: reminderHasAlarm ? '#FF6B00' : 'rgba(255, 255, 255, 0.08)',
-                              borderWidth: 1.5,
-                              borderColor: reminderHasAlarm ? '#FF8A00' : 'rgba(255, 107, 0, 0.28)',
-                              justifyContent: 'center',
-                              paddingHorizontal: 3,
-                            }}
-                          >
-                            <View 
-                              style={{
-                                width: 20,
-                                height: 20,
-                                borderRadius: 10,
-                                backgroundColor: reminderHasAlarm ? '#030202' : '#A9A09A',
-                                alignSelf: reminderHasAlarm ? 'flex-end' : 'flex-start',
-                              }}
-                            />
-                          </TouchableOpacity>
-                        </View>
-
-                        {reminderHasAlarm && (
-                          <View style={styles.spinnerRow}>
-                            <View style={styles.spinnerPanel}>
-                              <TouchableOpacity style={styles.spinnerButton} onPress={() => adjustReminderAlarmUnit('hour', 1)}>
-                                <Text style={styles.spinnerButtonText}>+</Text>
+                      <Text style={styles.sectionHeading}>SHARED TODOS</Text>
+                      {todos.length === 0 ? (
+                        <Text style={styles.noRemindersText}>No todos yet. Add one above — you'll both be reminded.</Text>
+                      ) : (
+                        todos.map((t) => {
+                          const due = new Date(t.due_at);
+                          const timeLabel = `${String(due.getHours()).padStart(2, '0')}:${String(due.getMinutes()).padStart(2, '0')}`;
+                          const recLabel = t.recurrence === 'once' ? due.toLocaleDateString() : t.recurrence;
+                          return (
+                            <View key={t.id} style={styles.reminderItemRow}>
+                              <TouchableOpacity
+                                style={[styles.reminderCheckbox, t.is_completed && styles.reminderCheckboxCompleted]}
+                                onPress={() => toggleTodo(t.id, !t.is_completed)}
+                              >
+                                {t.is_completed && <Check size={13} color="#FFFFFF" strokeWidth={3} />}
                               </TouchableOpacity>
-                              <Text style={styles.spinnerValue}>{String(reminderAlarmHour).padStart(2, '0')}</Text>
-                              <Text style={styles.spinnerLabel}>HOUR</Text>
-                              <TouchableOpacity style={styles.spinnerButton} onPress={() => adjustReminderAlarmUnit('hour', -1)}>
-                                <Text style={styles.spinnerButtonText}>-</Text>
-                              </TouchableOpacity>
-                            </View>
-
-                            <View style={styles.spinnerDivider}>
-                              <Text style={styles.spinnerColon}>:</Text>
-                            </View>
-
-                            <View style={styles.spinnerPanel}>
-                              <TouchableOpacity style={styles.spinnerButton} onPress={() => adjustReminderAlarmUnit('minute', 5)}>
-                                <Text style={styles.spinnerButtonText}>+</Text>
-                              </TouchableOpacity>
-                              <Text style={styles.spinnerValue}>{String(reminderAlarmMinute).padStart(2, '0')}</Text>
-                              <Text style={styles.spinnerLabel}>MIN</Text>
-                              <TouchableOpacity style={styles.spinnerButton} onPress={() => adjustReminderAlarmUnit('minute', -5)}>
-                                <Text style={styles.spinnerButtonText}>-</Text>
-                              </TouchableOpacity>
-                            </View>
-                          </View>
-                        )}
-                      </View>
-
-                      {/* Reminders List */}
-                      <View style={styles.remindersList}>
-                        {reminders.length === 0 ? (
-                          <Text style={styles.noRemindersText}>All caught up. Tap a chip above to add a routine.</Text>
-                        ) : (
-                          reminders.map((reminder) => {
-                            const meta = reminder.metadata as any;
-                            return (
-                              <View key={reminder.id} style={styles.reminderItemRow}>
-                                <TouchableOpacity 
-                                  style={[styles.reminderCheckbox, reminder.is_completed && styles.reminderCheckboxCompleted]}
-                                  onPress={() => toggleReminder(reminder.id, !reminder.is_completed)}
-                                >
-                                  {reminder.is_completed && <Check size={13} color="#FFFFFF" strokeWidth={3} />}
-                                </TouchableOpacity>
-                                <Text 
-                                  style={[
-                                    styles.reminderTitle, 
-                                    reminder.is_completed && styles.strikethroughText
-                                  ]}
-                                >
-                                  {reminder.title}
-                                  {meta?.has_alarm && meta?.alarm_time ? (
-                                    <Text style={{ color: '#FF6B00', fontWeight: 'bold', fontSize: 11 }}>
-                                      {`  ·  ${meta.alarm_time}`}
-                                    </Text>
-                                  ) : null}
+                              <View style={{ flex: 1 }}>
+                                <Text style={[styles.reminderTitle, t.is_completed && styles.strikethroughText]}>{t.title}</Text>
+                                <Text style={{ color: '#F18F2E', fontSize: 11, fontWeight: '700', marginTop: 2 }}>
+                                  {timeLabel} · {recLabel} · by {getCreatorName(t.created_by)}
                                 </Text>
-                                <TouchableOpacity 
-                                  style={styles.reminderDeleteButton}
-                                  onPress={() => deleteReminder(reminder.id)}
-                                >
-                                  <X size={13} color="#E74627" strokeWidth={2.5} />
-                                </TouchableOpacity>
+                                {t.notes ? <Text style={{ color: '#A9A09A', fontSize: 12, marginTop: 2 }}>{t.notes}</Text> : null}
                               </View>
+                              <TouchableOpacity style={styles.reminderDeleteButton} onPress={() => deleteTodo(t.id)}>
+                                <X size={13} color="#E74627" strokeWidth={2.5} />
+                              </TouchableOpacity>
+                            </View>
+                          );
+                        })
+                      )}
+                    </View>
+                    <View style={{ height: 100 }} />
+                  </View>
+                )}
+
+                {/* Complaint Box (Hub sub-screen) */}
+                {activeTab === 'complaints' && (
+                  <View style={styles.tabContent}>
+                    <TouchableOpacity
+                      style={styles.backRow}
+                      onPress={() => { if (openComplaintId) setOpenComplaintId(null); else setActiveTab('hub'); }}
+                    >
+                      <ChevronLeft size={20} color="#F18F2E" />
+                      <Text style={styles.backRowText}>{openComplaintId ? 'All complaints' : 'Hub'}</Text>
+                    </TouchableOpacity>
+
+                    {openComplaintId ? (() => {
+                      const c = complaints.find((x) => x.id === openComplaintId);
+                      if (!c) return <Text style={styles.noRemindersText}>This complaint was removed.</Text>;
+                      const thread = repliesFor(c.id);
+                      return (
+                        <View style={styles.sectionCard}>
+                          <View style={styles.rowBetween}>
+                            <Text style={[styles.sectionHeading, { flex: 1 }]}>{c.title}</Text>
+                            <View style={[styles.statusChip, { backgroundColor: c.status === 'resolved' ? 'rgba(46,204,113,0.18)' : 'rgba(231,70,39,0.18)' }]}>
+                              <Text style={{ color: c.status === 'resolved' ? '#2ECC71' : '#E74627', fontSize: 10, fontWeight: '800' }}>{c.status.toUpperCase()}</Text>
+                            </View>
+                          </View>
+                          <Text style={{ color: '#A9A09A', fontSize: 11, marginBottom: 6 }}>Filed by {getCreatorName(c.created_by)}</Text>
+                          {c.body ? <Text style={{ color: '#E5E0DC', fontSize: 14, marginBottom: 12 }}>{c.body}</Text> : null}
+
+                          <View style={{ gap: 8, marginBottom: 12 }}>
+                            {thread.length === 0 ? (
+                              <Text style={styles.noRemindersText}>No replies yet.</Text>
+                            ) : thread.map((r) => {
+                              const mine = r.author_id === userId;
+                              return (
+                                <View key={r.id} style={[styles.replyBubble, mine ? styles.replyMine : styles.replyTheirs]}>
+                                  <Text style={{ color: '#F18F2E', fontSize: 10, fontWeight: '800', marginBottom: 2 }}>{getCreatorName(r.author_id)}</Text>
+                                  <Text style={{ color: '#E5E0DC', fontSize: 13 }}>{r.body}</Text>
+                                </View>
+                              );
+                            })}
+                          </View>
+
+                          <View style={styles.addReminderRow}>
+                            <TextInput
+                              style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                              placeholder="Write a reply..."
+                              placeholderTextColor="#666"
+                              value={replyText}
+                              onChangeText={setReplyText}
+                            />
+                            <TouchableOpacity style={styles.plusAddButton} onPress={() => handleAddReply(c.id)}>
+                              <Send size={18} color="#030202" />
+                            </TouchableOpacity>
+                          </View>
+
+                          <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+                            <TouchableOpacity
+                              style={[styles.secondaryButton, { flex: 1 }]}
+                              onPress={() => setComplaintStatus(c.id, c.status === 'resolved' ? 'open' : 'resolved')}
+                            >
+                              <Text style={styles.secondaryBtnText}>{c.status === 'resolved' ? 'Reopen' : 'Mark resolved'}</Text>
+                            </TouchableOpacity>
+                            {c.created_by === userId ? (
+                              <TouchableOpacity
+                                style={[styles.secondaryButton, { flex: 1, backgroundColor: 'rgba(231,70,39,0.16)' }]}
+                                onPress={() => { deleteComplaint(c.id); setOpenComplaintId(null); }}
+                              >
+                                <Text style={[styles.secondaryBtnText, { color: '#E74627' }]}>Delete</Text>
+                              </TouchableOpacity>
+                            ) : null}
+                          </View>
+                        </View>
+                      );
+                    })() : (
+                      <>
+                        <View style={styles.sectionCard}>
+                          <Text style={styles.sectionHeading}>FILE A COMPLAINT</Text>
+                          <TextInput
+                            style={styles.input}
+                            placeholder="Title (e.g. You left the lights on)"
+                            placeholderTextColor="#666"
+                            value={newComplaintTitle}
+                            onChangeText={setNewComplaintTitle}
+                          />
+                          <TextInput
+                            style={[styles.input, { height: 80, textAlignVertical: 'top' }]}
+                            placeholder="Describe it (optional)"
+                            placeholderTextColor="#666"
+                            value={newComplaintBody}
+                            onChangeText={setNewComplaintBody}
+                            multiline
+                          />
+                          <TouchableOpacity style={styles.primaryButton} onPress={handleAddComplaint}>
+                            <Text style={styles.primaryBtnText}>SUBMIT COMPLAINT</Text>
+                          </TouchableOpacity>
+                        </View>
+
+                        <View style={styles.sectionCard}>
+                          <Text style={styles.sectionHeading}>COMPLAINT TICKETS</Text>
+                          {complaints.length === 0 ? (
+                            <Text style={styles.noRemindersText}>No complaints. All is well.</Text>
+                          ) : complaints.map((c) => {
+                            const count = repliesFor(c.id).length;
+                            return (
+                              <TouchableOpacity key={c.id} style={styles.ticketRow} onPress={() => setOpenComplaintId(c.id)}>
+                                <View style={{ flex: 1 }}>
+                                  <Text style={styles.ticketTitle}>{c.title}</Text>
+                                  <Text style={{ color: '#A9A09A', fontSize: 11, marginTop: 2 }}>
+                                    by {getCreatorName(c.created_by)} · {count} {count === 1 ? 'reply' : 'replies'}
+                                  </Text>
+                                </View>
+                                <View style={[styles.statusChip, { backgroundColor: c.status === 'resolved' ? 'rgba(46,204,113,0.18)' : 'rgba(231,70,39,0.18)' }]}>
+                                  <Text style={{ color: c.status === 'resolved' ? '#2ECC71' : '#E74627', fontSize: 10, fontWeight: '800' }}>{c.status.toUpperCase()}</Text>
+                                </View>
+                              </TouchableOpacity>
                             );
-                          })
-                        )}
-                      </View>
-                    </View>{/* Device-Specific DND & Wake-Up Optimization Guide */}
-                    {Platform.OS === 'android' && !isDndBypassGranted && (
-                      <View style={[styles.sectionCard, { marginBottom: 20 }]}>
-                        <Text style={styles.sectionHeading}>DEVICE OPTIMIZATION (SAMSUNG &amp; VIVO)</Text>
-                        <Text style={[styles.alarmHeaderSub, { marginBottom: 12, color: '#A9A09A' }]}>
-                          Samsung S23 (One UI) &amp; Vivo Y35 (Funtouch OS) require specific configurations to guarantee alarms ring and bypass Do Not Disturb (DND) mode.
-                        </Text>
-
-                        <View style={{ gap: 12 }}>
-                          {/* Samsung Section */}
-                          <View style={{ backgroundColor: 'rgba(255, 255, 255, 0.03)', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255, 107, 0, 0.15)' }}>
-                            <Text style={{ color: '#FF6B00', fontWeight: 'bold', fontSize: 13, marginBottom: 4 }}>Samsung S23 (One UI 5.x/6.x)</Text>
-                            <Text style={{ color: '#E5E0DC', fontSize: 11, lineHeight: 15 }}>
-                              1. Go to <Text style={{ fontWeight: 'bold' }}>Settings → Apps → NOVIA → Notifications → Notification categories</Text>.{"\n"}
-                              2. Tap <Text style={{ fontWeight: 'bold' }}>NOVIA Sync Alarms</Text> and toggle <Text style={{ fontWeight: 'bold', color: '#FF6B00' }}>Bypass Do Not Disturb</Text> ON.{"\n"}
-                              3. Go to <Text style={{ fontWeight: 'bold' }}>Battery</Text> inside App settings and select <Text style={{ fontWeight: 'bold', color: '#FF6B00' }}>Unrestricted</Text> to prevent One UI from sleeping the app background tasks.
-                            </Text>
-                          </View>
-
-                          {/* Vivo Section */}
-                          <View style={{ backgroundColor: 'rgba(255, 255, 255, 0.03)', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255, 107, 0, 0.15)' }}>
-                            <Text style={{ color: '#FF6B00', fontWeight: 'bold', fontSize: 13, marginBottom: 4 }}>Vivo Y35 (Funtouch OS 12/13)</Text>
-                            <Text style={{ color: '#E5E0DC', fontSize: 11, lineHeight: 15 }}>
-                              1. Go to <Text style={{ fontWeight: 'bold' }}>Settings → Battery → Background power consumption management</Text>.{"\n"}
-                              2. Find <Text style={{ fontWeight: 'bold' }}>NOVIA</Text> and select <Text style={{ fontWeight: 'bold', color: '#FF6B00' }}>Don't restrict background power</Text> (high power usage). Without this, Vivo's iManager will aggressively terminate coordinated alarms.{"\n"}
-                              3. In DND settings, add <Text style={{ fontWeight: 'bold' }}>NOVIA</Text> as a priority app.
-                            </Text>
-                          </View>
+                          })}
                         </View>
-
-                        {/* Interactive Buttons */}
-                        <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
-                          <TouchableOpacity 
-                            style={{
-                              flex: 1,
-                              backgroundColor: '#E74627',
-                              height: 48,
-                              borderRadius: THEME.borderRadius.sm,
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              borderWidth: 1.5,
-                              borderColor: '#FF8A00',
-                              shadowColor: '#E74627',
-                              shadowOpacity: 0.3,
-                              shadowRadius: 8,
-                              shadowOffset: { width: 0, height: 3 },
-                              elevation: 4,
-                            }}
-                            onPress={() => {
-                              if (Platform.OS === 'android') {
-                                Linking.openSettings();
-                              } else {
-                                Alert.alert("Android Only", "This option is specific to Android operating system configurations.");
-                              }
-                            }}
-                          >
-                            <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 11, letterSpacing: 0.5, textAlign: 'center', paddingHorizontal: 4 }}>
-                              APP INFO{"\n"}
-                              <Text style={{ fontSize: 9, fontWeight: 'normal', color: 'rgba(255, 255, 255, 0.8)' }}>(Battery / Alerts)</Text>
-                            </Text>
-                          </TouchableOpacity>
-
-                          <TouchableOpacity 
-                            style={{
-                              flex: 1,
-                              backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                              height: 48,
-                              borderRadius: THEME.borderRadius.sm,
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              borderWidth: 1.5,
-                              borderColor: '#FF6B00',
-                              shadowColor: '#FF6B00',
-                              shadowOpacity: 0.15,
-                              shadowRadius: 8,
-                              shadowOffset: { width: 0, height: 3 },
-                              elevation: 4,
-                            }}
-                            onPress={() => {
-                              if (Platform.OS === 'android') {
-                                Linking.sendIntent('android.settings.NOTIFICATION_POLICY_ACCESS_SETTINGS').catch(() => {
-                                  Linking.openSettings();
-                                });
-                              } else {
-                                Alert.alert("Android Only", "This option is specific to Android operating system configurations.");
-                              }
-                            }}
-                          >
-                            <Text style={{ color: '#FF6B00', fontWeight: '800', fontSize: 11, letterSpacing: 0.5, textAlign: 'center', paddingHorizontal: 4 }}>
-                              DND POLICY{"\n"}
-                              <Text style={{ fontSize: 9, fontWeight: 'normal', color: 'rgba(255, 107, 0, 0.8)' }}>(Grant DND Access)</Text>
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
+                      </>
                     )}
-
-                    {/* Padding Spacer to prevent floating tab bar overlapping */}
                     <View style={{ height: 100 }} />
                   </View>
                 )}
 
                 {/* Subscriptions & Borrowings Tab */}
                 {activeTab === 'finances' && (() => {
-                  // Calculate liabilities
+                  // Calculate liabilities. `yourOwed` / `partnerOwed` power the
+                  // per-person liability bars (total each is on the hook for).
+                  // The inter-partner net settlement is tracked separately from
+                  // borrowings only — self-liabilities are personal and must not
+                  // leak into who-owes-whom.
                   let yourOwed = 0;
                   let partnerOwed = 0;
                   let combinedTotal = 0;
                   let totalMonthlySubscriptions = 0;
+                  let yourBorrowings = 0;    // what you owe partner (borrowings)
+                  let partnerBorrowings = 0; // what partner owes you (borrowings)
 
                   const partnerDisplayName = partnerProfile?.display_name || partnerName || 'Partner';
-                  const activeSubscriptions = financeItems.filter(item => item.type === 'subscription' && !item.item_name.startsWith('[SELF_LIABILITY] '));
+                  // Only recurring (monthly/yearly) subscriptions belong in the
+                  // MONTHLY SUBSCRIPTION FORECAST — one-time ('none') items are not
+                  // a recurring burden, so the count stays consistent with the cost.
+                  const activeSubscriptions = financeItems.filter(item =>
+                    item.type === 'subscription' &&
+                    !item.item_name.startsWith('[SELF_LIABILITY] ') &&
+                    (item.renewal_cycle === 'monthly' || item.renewal_cycle === 'yearly')
+                  );
 
                   financeItems.forEach((item) => {
                     if (item.status === 'paid') return;
@@ -2140,14 +2028,16 @@ export default function App() {
                         totalMonthlySubscriptions += amt;
                       } else if (item.renewal_cycle === 'yearly') {
                         totalMonthlySubscriptions += amt / 12;
-                      } else {
-                        totalMonthlySubscriptions += amt;
                       }
+                      // 'none' (one-time) subscriptions are not a recurring
+                      // monthly burden, so they are excluded from the forecast.
                     } else if (item.type === 'borrowing') {
                       if (item.borrower_id === userId) {
                         yourOwed += amt;
+                        yourBorrowings += amt;
                       } else if (item.borrower_id === partnerProfile?.id) {
                         partnerOwed += amt;
+                        partnerBorrowings += amt;
                       }
                     }
                   });
@@ -2218,9 +2108,12 @@ export default function App() {
 
                       {/* Net Settlement Ledger Card */}
                       {(() => {
-                        const netOwed = partnerOwed - yourOwed;
+                        // Net settlement is strictly between partners — only
+                        // borrowings count (subscriptions cancel 50/50, self-
+                        // liabilities are personal and excluded entirely).
+                        const netOwed = partnerBorrowings - yourBorrowings;
                         return (
-                          <View style={[styles.settlementCard, netOwed > 0 ? { borderColor: 'rgba(68, 215, 182, 0.22)', backgroundColor: 'rgba(68, 215, 182, 0.02)' } : netOwed < 0 ? { borderColor: 'rgba(255, 107, 0, 0.22)', backgroundColor: 'rgba(255, 107, 0, 0.02)' } : {}]}>
+                          <View style={[styles.settlementCard, netOwed > 0 ? { backgroundColor: 'rgba(68, 215, 182, 0.10)' } : netOwed < 0 ? { backgroundColor: THEME.glass.accent } : {}]}>
                             <Text style={[styles.sectionHeading, { color: netOwed > 0 ? '#44D7B6' : netOwed < 0 ? '#FF6B00' : '#E5E5EA' }]}>NET SETTLEMENT LEDGER</Text>
                             {netOwed > 0 ? (
                               <View>
@@ -2228,7 +2121,7 @@ export default function App() {
                                   Overall, <Text style={{ color: '#44D7B6', fontWeight: 'bold' }}>{partnerDisplayName}</Text> owes you <Text style={{ color: '#44D7B6', fontWeight: 'bold', fontSize: 15 }}>₹{netOwed.toFixed(2)}</Text> net.
                                 </Text>
                                 <TouchableOpacity 
-                                  style={[styles.primaryButton, { backgroundColor: 'rgba(68, 215, 182, 0.15)', borderColor: '#44D7B6', borderWidth: 1 }]} 
+                                  style={[styles.primaryButton, { backgroundColor: 'rgba(68, 215, 182, 0.22)', shadowColor: '#44D7B6' }]}
                                   onPress={() => Alert.alert("Reminder Sent", `Pinged ${partnerDisplayName} to settle the ₹${netOwed.toFixed(2)} debt.`)}
                                 >
                                   <Text style={[styles.primaryBtnText, { color: '#44D7B6' }]}>Ping Partner</Text>
@@ -2262,7 +2155,7 @@ export default function App() {
                           <Text style={[styles.predText, { fontSize: 13, color: '#E5E5EA', marginBottom: 8 }]}>
                             Tracked Subscriptions: <Text style={{ color: '#FF6B00', fontWeight: 'bold' }}>{activeSubscriptions.length}</Text>
                           </Text>
-                          <View style={[styles.rowBetween, { borderTopWidth: 1, borderTopColor: 'rgba(255, 107, 0, 0.12)', paddingTop: 8 }]}>
+                          <View style={[styles.rowBetween, { marginTop: 12, paddingTop: 12 }]}>
                             <Text style={styles.progressLabel}>TOTAL MONTHLY BURDEN</Text>
                             <Text style={[styles.financeAmount, { color: '#FFD66B' }]}>₹{totalMonthlySubscriptions.toFixed(2)}/mo</Text>
                           </View>
@@ -2331,19 +2224,19 @@ export default function App() {
 
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12, gap: 8 }}>
                           <TouchableOpacity 
-                            style={[styles.smallBtn, { flex: 1 }, newType === 'borrowing' && { borderColor: THEME.colors.primary, borderWidth: 1.5 }]}
+                            style={[styles.smallBtn, { flex: 1 }, newType === 'borrowing' && { backgroundColor: THEME.glass.accentStrong, ...THEME.shadow.glowAccent }]}
                             onPress={() => setNewType('borrowing')}
                           >
                             <Text style={styles.btnText}>Borrowing</Text>
                           </TouchableOpacity>
                           <TouchableOpacity 
-                            style={[styles.smallBtn, { flex: 1 }, newType === 'subscription' && { borderColor: THEME.colors.primary, borderWidth: 1.5 }]}
+                            style={[styles.smallBtn, { flex: 1 }, newType === 'subscription' && { backgroundColor: THEME.glass.accentStrong, ...THEME.shadow.glowAccent }]}
                             onPress={() => setNewType('subscription')}
                           >
                             <Text style={styles.btnText}>Subscription</Text>
                           </TouchableOpacity>
                           <TouchableOpacity 
-                            style={[styles.smallBtn, { flex: 1 }, newType === 'self_liability' && { borderColor: '#A855F7', borderWidth: 1.5 }]}
+                            style={[styles.smallBtn, { flex: 1 }, newType === 'self_liability' && { backgroundColor: 'rgba(168, 85, 247, 0.20)', shadowColor: '#A855F7', shadowOpacity: 0.5, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 8 }]}
                             onPress={() => setNewType('self_liability')}
                           >
                             <Text style={[styles.btnText, newType === 'self_liability' && { color: '#A855F7', fontWeight: 'bold' }]}>Self Liability</Text>
@@ -2355,13 +2248,13 @@ export default function App() {
                             <Text style={styles.inputLabel}>LENDER DIRECTION (WHO OWE WHO?)</Text>
                             <View style={styles.rowBetween}>
                               <TouchableOpacity 
-                                style={[styles.smallBtn, financeLenderDirection === 'me' && { borderColor: THEME.colors.primary, borderWidth: 1.5 }, { flex: 1, marginRight: 6 }]}
+                                style={[styles.smallBtn, financeLenderDirection === 'me' && { backgroundColor: THEME.glass.accentStrong, ...THEME.shadow.glowAccent }, { flex: 1, marginRight: 6 }]}
                                 onPress={() => setFinanceLenderDirection('me')}
                               >
                                 <Text style={styles.btnText}>You lent to {partnerDisplayName}</Text>
                               </TouchableOpacity>
                               <TouchableOpacity 
-                                style={[styles.smallBtn, financeLenderDirection === 'partner' && { borderColor: THEME.colors.primary, borderWidth: 1.5 }, { flex: 1, marginLeft: 6 }]}
+                                style={[styles.smallBtn, financeLenderDirection === 'partner' && { backgroundColor: THEME.glass.accentStrong, ...THEME.shadow.glowAccent }, { flex: 1, marginLeft: 6 }]}
                                 onPress={() => setFinanceLenderDirection('partner')}
                               >
                                 <Text style={styles.btnText}>{partnerDisplayName} lent to You</Text>
@@ -2398,15 +2291,13 @@ export default function App() {
                           const isSelf = item.item_name.startsWith('[SELF_LIABILITY] ');
                           const displayItemName = isSelf ? item.item_name.replace('[SELF_LIABILITY] ', '') : item.item_name;
                           const cardStyle = isSelf ? [
-                            styles.financeCard, 
-                            { 
-                              borderColor: '#A855F7', 
-                              borderWidth: 1.5, 
-                              backgroundColor: 'rgba(168, 85, 247, 0.04)',
+                            styles.financeCard,
+                            {
+                              backgroundColor: 'rgba(168, 85, 247, 0.12)',
                               shadowColor: '#A855F7',
-                              shadowOffset: { width: 0, height: 2 },
-                              shadowOpacity: 0.15,
-                              shadowRadius: 6,
+                              shadowOffset: { width: 0, height: 10 },
+                              shadowOpacity: 0.35,
+                              shadowRadius: 18,
                             }
                           ] : styles.financeCard;
 
@@ -2565,7 +2456,7 @@ export default function App() {
                           
                           return (
                             <View>
-                              <View style={[styles.periodResultCard, { borderColor: phaseData.color, borderWidth: 1 }]}>
+                              <View style={[styles.periodResultCard, { backgroundColor: phaseData.color + '22' }]}>
                                 <Text style={[styles.predText, { color: phaseData.color, fontWeight: 'bold', fontSize: 14, marginBottom: 8 }]}>
                                   Current Status: {phaseData.badge}
                                 </Text>
@@ -2650,6 +2541,10 @@ export default function App() {
                 {/* Bucket List Tab */}
                 {activeTab === 'bucket' && (
                   <View style={styles.tabContent}>
+                    <TouchableOpacity style={styles.backRow} onPress={() => setActiveTab('hub')}>
+                      <ChevronLeft size={20} color="#F18F2E" />
+                      <Text style={styles.backRowText}>Hub</Text>
+                    </TouchableOpacity>
                     <View style={styles.sectionCard}>
                       <Text style={styles.sectionHeading}>ADD EXPERIENCES GOAL</Text>
                       <TextInput
@@ -2689,10 +2584,10 @@ export default function App() {
                     )}
                   </View>
                 )}
+                </ScreenTransition>
               </ScrollView>
             </KeyboardAvoidingView>
             </SafeAreaView>
-          )}
 
           {/* Bottom Absolute Black Fade Vignette Overlay */}
           <View style={styles.bottomOverlayFade} pointerEvents="none">
@@ -2711,23 +2606,11 @@ export default function App() {
           </View>
 
           {/* Premium Bottom Tab Bar */}
-          <View style={styles.tabBar}>
-            {(['hub', 'notes', 'alarms', 'finances', 'health', 'bucket', 'location'] as const).map((tab) => (
-              <TouchableOpacity
-                key={tab}
-                style={[styles.tabItem, activeTab === tab && styles.activeTabItem]}
-                onPress={() => setActiveTab(tab)}
-              >
-                <Text
-                  style={[styles.tabLabel, activeTab === tab && styles.activeTabLabel]}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                >
-                  {tab.toUpperCase()}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          <AnimatedTabBar
+            tabs={['hub', 'notes', 'finances', 'health'] as const}
+            activeTab={activeTab}
+            onChange={setActiveTab}
+          />
 
           {/* Visual Calendar Modal */}
           <Modal
@@ -2744,7 +2627,8 @@ export default function App() {
                 <Text style={styles.calendarModalTitle}>
                   SELECT {calendarTarget === 'periodStartDate' ? 'START DATE' :
                           calendarTarget === 'periodEndDate' ? 'END DATE' :
-                          calendarTarget === 'hospitalDate' ? 'VISIT DATE' : 'DUE DATE'}
+                          calendarTarget === 'hospitalDate' ? 'VISIT DATE' :
+                          calendarTarget === 'todoDate' ? 'TODO DATE' : 'DUE DATE'}
                 </Text>
                 <Calendar
                   onDayPress={(day: any) => handleDateSelect(day.dateString)}
@@ -2834,10 +2718,14 @@ export default function App() {
                   onPress={() => {
                     toggleDrawer(false);
                     setIsSettingsVisible(true);
+                    markUpdatesViewed();
                   }}
                 >
                   <SettingsIcon color="#FF6B00" size={20} style={{ marginRight: 12 }} />
-                  <Text style={styles.drawerMenuText}>Settings</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={styles.drawerMenuText}>Settings</Text>
+                    {hasUnseenUpdate && <View style={styles.unseenDot} />}
+                  </View>
                 </TouchableOpacity>
 
                 <TouchableOpacity 
@@ -2918,8 +2806,29 @@ export default function App() {
                     </View>
                   </View>
 
+                  <View style={styles.settingsSection}>
+                    <Text style={styles.settingsSectionTitle}>What's New</Text>
+                    <Text style={styles.settingsHelpText}>
+                      Updates pushed to NOVIA. Your partner sees the same list.
+                    </Text>
+                    {appUpdates.length === 0 ? (
+                      <Text style={styles.settingsHelpText}>No updates published yet.</Text>
+                    ) : (
+                      appUpdates.map((u) => (
+                        <View key={u.id} style={styles.updateEntry}>
+                          <View style={styles.rowBetween}>
+                            <Text style={styles.updateVersion}>v{u.version}</Text>
+                            <Text style={styles.updateDate}>{new Date(u.created_at).toLocaleDateString()}</Text>
+                          </View>
+                          <Text style={styles.updateTitle}>{u.title}</Text>
+                          {u.body ? <Text style={styles.updateBody}>{u.body}</Text> : null}
+                        </View>
+                      ))
+                    )}
+                  </View>
+
                   {coupleId && (
-                    <View style={[styles.settingsSection, { borderBottomWidth: 0, marginBottom: 0, paddingBottom: 0 }]}>
+                    <View style={[styles.settingsSection, { marginBottom: 0, paddingBottom: 0 }]}>
                       <Text style={styles.settingsSectionTitle}>Danger Zone</Text>
                       <Text style={styles.settingsHelpText}>
                         Unpairing will decouple your screens. Your data remains safe on Supabase.
@@ -2939,108 +2848,6 @@ export default function App() {
           </Modal>
         </View>
       )}
-
-      {/* Premium Alarm Ringing Modal Overlay */}
-      <Modal
-        visible={!!ringingAlarm}
-        transparent
-        animationType="fade"
-        onRequestClose={handleDismissAlarm}
-      >
-        <View style={styles.ringingOverlayBg}>
-          <View style={styles.ringingGlassContent}>
-            {/* Pulsing breathing cat logo */}
-            <View style={styles.ringingCatRing}>
-              <Image 
-                source={require('./assets/cat.png')} 
-                style={styles.ringingCatGlow}
-                resizeMode="contain"
-              />
-            </View>
-
-            <Text style={styles.ringingTitle}>NOVIA ALARM</Text>
-            
-            {ringingAlarm && (
-              <>
-                <Text style={styles.ringingTime}>
-                  {ringingAlarm.alarm_time.slice(0, 5)}
-                </Text>
-                <Text style={styles.ringingPurpose}>
-                  {ringingAlarm.purpose || 'Wake up. Live in sync.'}
-                </Text>
-                <Text style={styles.ringingSubText}>
-                  Sync Mode: {ringingAlarm.sync_mode.toUpperCase()}
-                </Text>
-              </>
-            )}
-
-            <View style={styles.ringingActionRow}>
-              <TouchableOpacity 
-                style={[styles.ringingButton, styles.ringingSnoozeBtn]} 
-                onPress={handleSnoozeAlarm}
-              >
-                <Text style={styles.ringingBtnText}>SNOOZE (5M)</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity 
-                style={[styles.ringingButton, styles.ringingDismissBtn]} 
-                onPress={handleDismissAlarm}
-              >
-                <Text style={styles.ringingBtnText}>WAKE UP</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Premium Reminder Ringing Modal Overlay */}
-      <Modal
-        visible={!!ringingReminder}
-        transparent
-        animationType="fade"
-        onRequestClose={handleDismissReminder}
-      >
-        <View style={styles.ringingOverlayBg}>
-          <View style={styles.ringingGlassContent}>
-            <View style={styles.ringingCatRing}>
-              <Image 
-                source={require('./assets/cat.png')} 
-                style={[styles.ringingCatGlow, { tintColor: '#FF6B00' }]}
-                resizeMode="contain"
-              />
-            </View>
-
-            <Text style={styles.ringingTitle}>DAILY ROUTINE</Text>
-
-            {ringingReminder && (
-              <>
-                <Text style={styles.ringingPurpose}>
-                  {ringingReminder.title}
-                </Text>
-                <Text style={[styles.ringingSubText, { fontSize: 14, marginHorizontal: 20, textAlign: 'center' }]}>
-                  Time to complete your shared routine task.
-                </Text>
-              </>
-            )}
-
-            <View style={styles.ringingActionRow}>
-              <TouchableOpacity 
-                style={[styles.ringingButton, styles.ringingSnoozeBtn, { borderColor: '#555' }]} 
-                onPress={handleDismissReminder}
-              >
-                <Text style={styles.ringingBtnText}>DISMISS</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity 
-                style={[styles.ringingButton, styles.ringingDismissBtn, { backgroundColor: '#FF6B00', borderColor: '#FF6B00' }]} 
-                onPress={handleCompleteReminder}
-              >
-                <Text style={styles.ringingBtnText}>COMPLETE</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
       </View>
     </View>
   );
@@ -3063,10 +2870,8 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingVertical: THEME.spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(29, 29, 28, 0.12)',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.015)',
+    backgroundColor: 'transparent',
   },
   logo: {
     fontSize: 22,
@@ -3085,19 +2890,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   card: {
-    backgroundColor: 'rgba(255, 255, 255, 0.055)',
+    backgroundColor: THEME.glass.surface,
     padding: THEME.spacing.lg,
     borderRadius: THEME.borderRadius.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.10)',
-    borderTopColor: 'rgba(255, 255, 255, 0.24)',
     width: '100%',
     marginTop: THEME.spacing.xl,
-    shadowColor: '#000000',
-    shadowOpacity: 0.38,
-    shadowRadius: 28,
-    shadowOffset: { width: 0, height: 18 },
-    elevation: 8,
+    ...THEME.shadow.lifted,
   },
   cardTitle: {
     fontSize: 22,
@@ -3151,12 +2949,10 @@ const styles = StyleSheet.create({
     marginBottom: THEME.spacing.xs,
   },
   suggestionContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.02)',
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     marginTop: 8,
   },
   welcomeCopy: {
@@ -3166,18 +2962,11 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   partnerCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.055)',
+    backgroundColor: THEME.glass.surface,
     padding: THEME.spacing.md,
     borderRadius: THEME.borderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.10)',
-    borderTopColor: 'rgba(255, 255, 255, 0.24)',
     marginBottom: THEME.spacing.md,
-    shadowColor: '#000000',
-    shadowOpacity: 0.32,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: 14 },
-    elevation: 6,
+    ...THEME.shadow.soft,
   },
   sectionHeading: {
     fontSize: 15,
@@ -3213,32 +3002,24 @@ const styles = StyleSheet.create({
     marginTop: THEME.spacing.sm,
   },
   sectionCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.055)',
+    backgroundColor: THEME.glass.surface,
     padding: THEME.spacing.md,
     borderRadius: THEME.borderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.10)',
-    borderTopColor: 'rgba(255, 255, 255, 0.24)',
     marginBottom: THEME.spacing.md,
-    shadowColor: '#000000',
-    shadowOpacity: 0.32,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: 14 },
-    elevation: 6,
+    ...THEME.shadow.soft,
   },
   moodRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
   moodBtn: {
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: THEME.glass.surface,
     flex: 1,
     marginHorizontal: 3,
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderRadius: THEME.borderRadius.sm,
     alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    ...THEME.shadow.soft,
   },
   moodBtnText: {
     color: '#FFFFFF',
@@ -3246,15 +3027,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   input: {
-    backgroundColor: 'rgba(0, 0, 0, 0.22)',
+    backgroundColor: THEME.glass.inset,
     color: '#FFFFFF',
     borderRadius: THEME.borderRadius.md,
     paddingHorizontal: THEME.spacing.md,
-    paddingVertical: 12,
+    paddingVertical: 14,
     fontSize: 19,
     marginBottom: THEME.spacing.sm,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
   },
   primaryButton: {
     backgroundColor: '#E74627',
@@ -3262,14 +3041,7 @@ const styles = StyleSheet.create({
     borderRadius: THEME.borderRadius.md,
     alignItems: 'center',
     marginTop: THEME.spacing.xs,
-    borderWidth: 1.5,
-    borderColor: '#F18F2E',
-    borderTopColor: '#FBB360',
-    shadowColor: '#E74627',
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 8,
+    ...THEME.shadow.glowAccent,
   },
   primaryBtnText: {
     color: '#FFFFFF',
@@ -3278,9 +3050,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
   },
   firstAidResponse: {
-    backgroundColor: 'rgba(46, 204, 113, 0.08)',
-    borderColor: 'rgba(46, 204, 113, 0.25)',
-    borderWidth: 1,
+    backgroundColor: THEME.glass.success,
     borderRadius: THEME.borderRadius.sm,
     padding: THEME.spacing.md,
     marginTop: THEME.spacing.sm,
@@ -3311,13 +3081,11 @@ const styles = StyleSheet.create({
     marginTop: THEME.spacing.xs,
   },
   canvasCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.055)',
+    backgroundColor: THEME.glass.surface,
     padding: THEME.spacing.md,
     borderRadius: THEME.borderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.10)',
-    borderTopColor: 'rgba(255, 255, 255, 0.22)',
     minHeight: 350,
+    ...THEME.shadow.soft,
   },
   canvasText: {
     flex: 1,
@@ -3335,20 +3103,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   noteCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.055)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.10)',
-    borderTopColor: 'rgba(255, 255, 255, 0.22)',
+    backgroundColor: THEME.glass.surface,
     borderRadius: THEME.borderRadius.md,
     padding: THEME.spacing.md,
     width: '48%',
     marginBottom: THEME.spacing.md,
     minHeight: 128,
-    shadowColor: '#000000',
-    shadowOpacity: 0.26,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 5,
+    ...THEME.shadow.soft,
   },
   noteAuthor: {
     color: THEME.colors.primary,
@@ -3388,12 +3149,10 @@ const styles = StyleSheet.create({
     marginBottom: THEME.spacing.xs,
   },
   addAlarmButton: {
-    backgroundColor: 'rgba(231, 70, 39, 0.08)',
-    borderColor: '#E74627',
-    borderWidth: 1,
+    backgroundColor: THEME.glass.accentStrong,
     borderRadius: THEME.borderRadius.sm,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
     minWidth: 74,
     alignItems: 'center',
   },
@@ -3403,9 +3162,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   deleteAlarmButton: {
-    backgroundColor: 'transparent',
-    borderColor: '#EF5350',
-    borderWidth: 1,
+    backgroundColor: 'rgba(239, 83, 80, 0.12)',
     borderRadius: THEME.borderRadius.sm,
     alignItems: 'center',
     padding: THEME.spacing.md,
@@ -3417,18 +3174,11 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   alarmCreatorCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.055)',
-    borderColor: 'rgba(255, 255, 255, 0.10)',
-    borderTopColor: 'rgba(255, 255, 255, 0.24)',
-    borderWidth: 1,
+    backgroundColor: THEME.glass.surface,
     borderRadius: THEME.borderRadius.md,
     padding: THEME.spacing.md,
     marginBottom: THEME.spacing.md,
-    shadowColor: '#000000',
-    shadowOpacity: 0.38,
-    shadowRadius: 28,
-    shadowOffset: { width: 0, height: 18 },
-    elevation: 8,
+    ...THEME.shadow.lifted,
   },
   alarmPreview: {
     color: '#FFFFFF',
@@ -3446,21 +3196,17 @@ const styles = StyleSheet.create({
   spinnerPanel: {
     flex: 1,
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    backgroundColor: THEME.glass.inset,
     borderRadius: THEME.borderRadius.md,
     padding: THEME.spacing.sm,
   },
   spinnerButton: {
-    width: 42,
-    height: 34,
+    width: 44,
+    height: 36,
     borderRadius: THEME.borderRadius.sm,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(231, 70, 39, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(231, 70, 39, 0.25)',
+    backgroundColor: THEME.glass.accentStrong,
   },
   spinnerButtonText: {
     color: '#E74627',
@@ -3495,23 +3241,17 @@ const styles = StyleSheet.create({
     marginBottom: THEME.spacing.md,
   },
   dayChip: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    backgroundColor: THEME.glass.surface,
+    ...THEME.shadow.soft,
   },
   activeDayChip: {
     backgroundColor: '#E74627',
-    borderColor: '#F18F2E',
-    shadowColor: '#E74627',
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
+    ...THEME.shadow.glowAccent,
   },
   dayChipText: {
     color: '#CCCCCC',
@@ -3523,11 +3263,9 @@ const styles = StyleSheet.create({
   },
   segmentControl: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    backgroundColor: THEME.glass.inset,
     borderRadius: THEME.borderRadius.sm,
-    padding: 4,
+    padding: 5,
     marginBottom: THEME.spacing.sm,
   },
   segmentOption: {
@@ -3548,12 +3286,9 @@ const styles = StyleSheet.create({
     color: '#E74627',
   },
   emptyCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    backgroundColor: 'rgba(255, 255, 255, 0.035)',
     padding: THEME.spacing.lg,
     borderRadius: THEME.borderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.10)',
-    borderTopColor: 'rgba(255, 255, 255, 0.18)',
     alignItems: 'center',
   },
   emptyText: {
@@ -3562,22 +3297,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   alarmRowCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.055)',
+    backgroundColor: THEME.glass.surface,
     padding: THEME.spacing.md,
     borderRadius: THEME.borderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.10)',
-    borderTopColor: 'rgba(255, 255, 255, 0.22)',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: THEME.spacing.sm,
     gap: 10,
-    shadowColor: '#000000',
-    shadowOpacity: 0.28,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 5,
+    ...THEME.shadow.soft,
   },
   alarmTime: {
     fontSize: 32,
@@ -3601,31 +3329,43 @@ const styles = StyleSheet.create({
     marginTop: 3,
     fontWeight: '700',
   },
+  alarmCreatorText: {
+    fontSize: 11,
+    color: '#8A817C',
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  reminderDateButton: {
+    backgroundColor: THEME.glass.inset,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+  reminderDateButtonText: {
+    color: '#FFD66B',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   row: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'flex-end',
   },
   actionBtnSnooze: {
-    backgroundColor: 'rgba(231, 70, 39, 0.08)',
-    borderColor: '#E74627',
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    backgroundColor: THEME.glass.accentStrong,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderRadius: THEME.borderRadius.sm,
     marginRight: 6,
   },
   actionBtnDismiss: {
-    backgroundColor: 'rgba(231, 76, 60, 0.08)',
-    borderColor: '#E74C3C',
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    backgroundColor: THEME.glass.danger,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderRadius: THEME.borderRadius.sm,
   },
   disabledActionButton: {
-    opacity: 0.55,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
+    opacity: 0.5,
   },
   btnText: {
     color: '#FFFFFF',
@@ -3633,32 +3373,24 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   smallBtn: {
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
     flex: 1,
     marginHorizontal: 3,
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderRadius: THEME.borderRadius.sm,
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: THEME.glass.surface,
     marginBottom: THEME.spacing.sm,
+    ...THEME.shadow.soft,
   },
   financeCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.055)',
+    backgroundColor: THEME.glass.surface,
     padding: THEME.spacing.md,
     borderRadius: THEME.borderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.10)',
-    borderTopColor: 'rgba(255, 255, 255, 0.22)',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: THEME.spacing.sm,
-    shadowColor: '#000000',
-    shadowOpacity: 0.28,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 5,
+    ...THEME.shadow.soft,
   },
   financeName: {
     fontSize: 15,
@@ -3680,25 +3412,19 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   miniActionButton: {
-    backgroundColor: 'rgba(231, 70, 39, 0.08)',
-    borderColor: '#E74627',
-    borderWidth: 1,
+    backgroundColor: THEME.glass.accentStrong,
     borderRadius: THEME.borderRadius.sm,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   miniDangerButton: {
-    backgroundColor: 'rgba(231, 76, 60, 0.08)',
-    borderColor: '#E74C3C',
-    borderWidth: 1,
+    backgroundColor: THEME.glass.danger,
     borderRadius: THEME.borderRadius.sm,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   periodResultCard: {
-    backgroundColor: 'rgba(231, 70, 39, 0.05)',
-    borderColor: 'rgba(231, 70, 39, 0.18)',
-    borderWidth: 1,
+    backgroundColor: THEME.glass.accent,
     borderRadius: THEME.borderRadius.sm,
     padding: THEME.spacing.md,
   },
@@ -3709,9 +3435,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   vaultRow: {
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.12)',
+    backgroundColor: THEME.glass.surface,
+    borderRadius: THEME.borderRadius.sm,
+    marginBottom: THEME.spacing.xs,
     padding: THEME.spacing.md,
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -3726,12 +3452,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   bucketRow: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: THEME.glass.surface,
     padding: THEME.spacing.md,
     borderRadius: THEME.borderRadius.sm,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-    marginBottom: THEME.spacing.xs,
+    marginBottom: THEME.spacing.sm,
+    ...THEME.shadow.soft,
   },
   bucketText: {
     color: '#FFFFFF',
@@ -3784,11 +3509,9 @@ const styles = StyleSheet.create({
   },
   locationSecondaryBtn: {
     marginTop: THEME.spacing.sm,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderRadius: THEME.borderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(241, 143, 46, 0.5)',
-    backgroundColor: 'rgba(241, 143, 46, 0.10)',
+    backgroundColor: 'rgba(241, 143, 46, 0.16)',
     alignItems: 'center',
   },
   locationSecondaryBtnText: {
@@ -3798,10 +3521,9 @@ const styles = StyleSheet.create({
   },
   locationStopBtn: {
     marginTop: THEME.spacing.sm,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderRadius: THEME.borderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(231, 76, 60, 0.5)',
+    backgroundColor: THEME.glass.danger,
     alignItems: 'center',
   },
   locationStopBtnText: {
@@ -3818,10 +3540,7 @@ const styles = StyleSheet.create({
   },
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(14, 13, 12, 0.86)',
-    borderColor: 'rgba(231, 70, 39, 0.45)',
-    borderTopColor: 'rgba(255, 255, 255, 0.16)',
-    borderWidth: 1,
+    backgroundColor: 'rgba(18, 17, 16, 0.82)',
     borderRadius: 34,
     position: 'absolute',
     bottom: Platform.OS === 'android' ? 76 : 64,
@@ -3830,13 +3549,26 @@ const styles = StyleSheet.create({
     height: 66,
     justifyContent: 'space-around',
     alignItems: 'center',
-    paddingHorizontal: 8,
+    paddingHorizontal: 6,
     shadowColor: '#000000',
-    shadowOpacity: 0.55,
-    shadowRadius: 26,
-    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.6,
+    shadowRadius: 30,
+    shadowOffset: { width: 0, height: 18 },
     zIndex: 10,
-    elevation: 14,
+    elevation: 16,
+  },
+  tabIndicator: {
+    position: 'absolute',
+    left: 0,
+    top: 8,
+    bottom: 8,
+    borderRadius: 24,
+    backgroundColor: 'rgba(231, 70, 39, 0.18)',
+    shadowColor: '#E74627',
+    shadowOpacity: 0.45,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 6,
   },
   bottomOverlayFade: {
     position: 'absolute',
@@ -3889,9 +3621,7 @@ const styles = StyleSheet.create({
     marginBottom: THEME.spacing.lg,
   },
   penaltyCard: {
-    backgroundColor: 'rgba(231, 76, 60, 0.08)',
-    borderColor: 'rgba(231, 76, 60, 0.25)',
-    borderWidth: 1,
+    backgroundColor: THEME.glass.danger,
     padding: THEME.spacing.md,
     borderRadius: THEME.borderRadius.md,
     width: '100%',
@@ -3923,17 +3653,18 @@ const styles = StyleSheet.create({
   authTabRow: {
     flexDirection: 'row',
     marginBottom: THEME.spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.12)',
+    backgroundColor: THEME.glass.inset,
+    borderRadius: THEME.borderRadius.sm,
+    padding: 5,
   },
   authTab: {
     flex: 1,
     paddingVertical: THEME.spacing.sm,
     alignItems: 'center',
+    borderRadius: THEME.borderRadius.sm,
   },
   activeAuthTab: {
-    borderBottomWidth: 2,
-    borderBottomColor: THEME.colors.primary,
+    backgroundColor: THEME.glass.accentStrong,
   },
   authTabText: {
     color: '#A0A0A0',
@@ -3956,10 +3687,8 @@ const styles = StyleSheet.create({
     marginBottom: THEME.spacing.xs,
   },
   userIdContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    backgroundColor: THEME.glass.inset,
     borderRadius: THEME.borderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
     padding: THEME.spacing.md,
     width: '100%',
     marginBottom: THEME.spacing.md,
@@ -3976,9 +3705,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '700',
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    borderColor: 'rgba(255, 255, 255, 0.18)',
-    borderWidth: 1,
+    backgroundColor: THEME.glass.surfaceStrong,
     borderRadius: THEME.borderRadius.sm,
     padding: THEME.spacing.sm,
     width: '100%',
@@ -3997,9 +3724,7 @@ const styles = StyleSheet.create({
     marginVertical: THEME.spacing.md,
   },
   signOutButton: {
-    borderColor: THEME.colors.danger,
-    borderWidth: 1,
-    backgroundColor: 'transparent',
+    backgroundColor: THEME.glass.danger,
     padding: THEME.spacing.md,
     borderRadius: THEME.borderRadius.sm,
     alignItems: 'center',
@@ -4014,11 +3739,9 @@ const styles = StyleSheet.create({
   },
   reminderDeleteButton: {
     marginLeft: THEME.spacing.sm,
-    padding: 6,
+    padding: 8,
     borderRadius: THEME.borderRadius.sm,
-    backgroundColor: 'rgba(231, 76, 60, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(231, 76, 60, 0.2)',
+    backgroundColor: THEME.glass.danger,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -4032,11 +3755,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: THEME.spacing.md,
-    backgroundColor: 'rgba(231, 70, 39, 0.05)',
+    backgroundColor: THEME.glass.accent,
     padding: THEME.spacing.md,
     borderRadius: THEME.borderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(231, 70, 39, 0.18)',
   },
   analyticsLabel: {
     fontSize: 10,
@@ -4083,20 +3804,15 @@ const styles = StyleSheet.create({
     width: 58,
     height: 72,
     borderRadius: THEME.borderRadius.md,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: THEME.glass.surface,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: THEME.spacing.xs,
+    ...THEME.shadow.soft,
   },
   activeDateCard: {
     backgroundColor: '#E74627',
-    borderColor: '#F18F2E',
-    shadowColor: '#E74627',
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    elevation: 4,
+    ...THEME.shadow.glowAccent,
   },
   dateCardDay: {
     fontSize: 9,
@@ -4126,12 +3842,10 @@ const styles = StyleSheet.create({
     marginBottom: THEME.spacing.md,
   },
   quickAddChip: {
-    backgroundColor: 'rgba(231, 70, 39, 0.08)',
-    borderColor: 'rgba(231, 70, 39, 0.25)',
-    borderWidth: 1,
+    backgroundColor: THEME.glass.accentStrong,
     borderRadius: THEME.borderRadius.round,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
   },
   quickAddChipText: {
     color: '#E74627',
@@ -4175,26 +3889,23 @@ const styles = StyleSheet.create({
   reminderItemRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    paddingHorizontal: THEME.spacing.sm,
-    paddingVertical: THEME.spacing.sm,
+    backgroundColor: THEME.glass.surface,
+    paddingHorizontal: THEME.spacing.md,
+    paddingVertical: 14,
     borderRadius: THEME.borderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    ...THEME.shadow.soft,
   },
   reminderCheckbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 4,
-    borderWidth: 2,
-    borderColor: '#E74627',
+    width: 24,
+    height: 24,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: THEME.glass.inset,
   },
   reminderCheckboxCompleted: {
     backgroundColor: '#E74627',
-    borderColor: '#F18F2E',
+    ...THEME.shadow.glowAccent,
   },
   checkMark: {
     color: '#FFFFFF',
@@ -4222,16 +3933,10 @@ const styles = StyleSheet.create({
   calendarModalContent: {
     width: '100%',
     maxWidth: 340,
-    backgroundColor: '#121212',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 107, 0, 0.45)',
-    shadowColor: '#FF6B00',
-    shadowOpacity: 0.18,
-    shadowRadius: 15,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
+    backgroundColor: 'rgba(24, 22, 21, 0.94)',
+    borderRadius: 24,
+    padding: 18,
+    ...THEME.shadow.lifted,
   },
   calendarModalTitle: {
     fontSize: 12,
@@ -4243,11 +3948,9 @@ const styles = StyleSheet.create({
   },
   calendarCloseBtn: {
     marginTop: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    paddingVertical: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: THEME.glass.surfaceStrong,
+    paddingVertical: 14,
+    borderRadius: 12,
     alignItems: 'center',
   },
   calendarCloseBtnText: {
@@ -4257,11 +3960,9 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
   },
   calendarPickerBtn: {
-    backgroundColor: 'rgba(255, 255, 255, 0.02)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 107, 0, 0.22)',
-    borderRadius: 8,
-    paddingVertical: 12,
+    backgroundColor: THEME.glass.inset,
+    borderRadius: 12,
+    paddingVertical: 14,
     paddingHorizontal: 16,
     marginBottom: 12,
     flexDirection: 'row',
@@ -4274,12 +3975,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   questionnaireCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.02)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 107, 0, 0.12)',
-    borderRadius: 12,
-    padding: 14,
+    backgroundColor: THEME.glass.surface,
+    borderRadius: 16,
+    padding: 16,
     marginBottom: 16,
+    ...THEME.shadow.soft,
   },
   questionTitle: {
     color: '#FFD66B',
@@ -4296,16 +3996,13 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   optionChip: {
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    borderRadius: 6,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: THEME.glass.surface,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
   },
   optionChipSelected: {
-    backgroundColor: 'rgba(255, 107, 0, 0.12)',
-    borderColor: '#FF6B00',
+    backgroundColor: THEME.glass.accentStrong,
   },
   optionText: {
     color: '#E5E5EA',
@@ -4317,10 +4014,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   adviceCard: {
-    backgroundColor: 'rgba(255, 107, 0, 0.03)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 107, 0, 0.2)',
-    borderRadius: 12,
+    backgroundColor: THEME.glass.accent,
+    borderRadius: 16,
     padding: 16,
     marginTop: 12,
   },
@@ -4337,39 +4032,31 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   settlementCard: {
-    backgroundColor: 'rgba(255, 77, 77, 0.02)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 77, 77, 0.18)',
-    borderRadius: 12,
+    backgroundColor: THEME.glass.surface,
+    borderRadius: 16,
     padding: 16,
     marginBottom: 16,
+    ...THEME.shadow.soft,
   },
   subscriptionForecastCard: {
-    backgroundColor: 'rgba(255, 107, 0, 0.02)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 107, 0, 0.12)',
-    borderRadius: 12,
+    backgroundColor: THEME.glass.surface,
+    borderRadius: 16,
     padding: 16,
     marginBottom: 16,
+    ...THEME.shadow.soft,
   },
   floatingMenuButton: {
     position: 'absolute',
     top: Platform.OS === 'ios' ? 12 : 16,
     left: 16,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 107, 0, 0.25)',
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(28, 26, 25, 0.82)',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 50,
-    shadowColor: '#FF6B00',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 6,
+    ...THEME.shadow.soft,
   },
   drawerBackdrop: {
     position: 'absolute',
@@ -4386,42 +4073,37 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     width: 280,
-    backgroundColor: '#0c0c0d',
-    borderRightWidth: 1,
-    borderRightColor: 'rgba(255, 107, 0, 0.15)',
+    backgroundColor: 'rgba(14, 13, 12, 0.96)',
     paddingTop: Platform.OS === 'ios' ? 60 : 40,
     paddingHorizontal: 20,
     zIndex: 1000,
     shadowColor: '#000',
-    shadowOffset: { width: 4, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 16,
+    shadowOffset: { width: 8, height: 0 },
+    shadowOpacity: 0.45,
+    shadowRadius: 24,
+    elevation: 20,
   },
   drawerCloseButton: {
     alignSelf: 'flex-end',
-    padding: 8,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    padding: 10,
+    borderRadius: 12,
+    backgroundColor: THEME.glass.surface,
     marginBottom: 20,
   },
   drawerProfileSection: {
     alignItems: 'center',
     paddingBottom: 24,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 107, 0, 0.12)',
     marginBottom: 24,
   },
   drawerAvatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    borderWidth: 2,
-    borderColor: '#FF6B00',
-    backgroundColor: 'rgba(255, 107, 0, 0.1)',
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: THEME.glass.accentStrong,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 12,
+    ...THEME.shadow.glowAccent,
   },
   drawerAvatarText: {
     fontSize: 24,
@@ -4442,12 +4124,10 @@ const styles = StyleSheet.create({
   drawerPartnerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 107, 0, 0.06)',
-    paddingVertical: 4,
-    paddingHorizontal: 10,
+    backgroundColor: THEME.glass.accent,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 107, 0, 0.15)',
   },
   drawerPartnerText: {
     fontSize: 11,
@@ -4483,16 +4163,10 @@ const styles = StyleSheet.create({
   settingsModalContent: {
     width: '100%',
     maxWidth: 360,
-    backgroundColor: '#0c0c0d',
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 107, 0, 0.3)',
-    shadowColor: '#FF6B00',
-    shadowOpacity: 0.15,
-    shadowRadius: 15,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
+    backgroundColor: 'rgba(20, 19, 18, 0.95)',
+    borderRadius: 24,
+    padding: 22,
+    ...THEME.shadow.lifted,
   },
   settingsHeader: {
     flexDirection: 'row',
@@ -4500,8 +4174,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 20,
     paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 107, 0, 0.12)',
   },
   settingsTitle: {
     fontSize: 13,
@@ -4515,8 +4187,6 @@ const styles = StyleSheet.create({
   settingsSection: {
     marginBottom: 20,
     paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
   },
   settingsSectionTitle: {
     fontSize: 11,
@@ -4527,21 +4197,20 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   settingsInput: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 107, 0, 0.2)',
-    borderRadius: 8,
+    backgroundColor: THEME.glass.inset,
+    borderRadius: 12,
     color: '#FFFFFF',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     fontSize: 14,
   },
   settingsSaveButton: {
     backgroundColor: '#FF6B00',
-    paddingVertical: 10,
-    borderRadius: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
     alignItems: 'center',
     marginTop: 10,
+    ...THEME.shadow.glowAccent,
   },
   settingsSaveBtnText: {
     color: '#FFFFFF',
@@ -4556,11 +4225,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   unpairButton: {
-    backgroundColor: 'rgba(255, 69, 58, 0.1)',
-    borderWidth: 1,
-    borderColor: '#FF453A',
-    paddingVertical: 10,
-    borderRadius: 8,
+    backgroundColor: 'rgba(255, 69, 58, 0.14)',
+    paddingVertical: 12,
+    borderRadius: 12,
     alignItems: 'center',
   },
   unpairBtnText: {
@@ -4579,32 +4246,25 @@ const styles = StyleSheet.create({
   ringingGlassContent: {
     width: '100%',
     maxWidth: 380,
-    backgroundColor: 'rgba(20, 20, 25, 0.85)',
-    borderRadius: 24,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 107, 0, 0.35)',
+    backgroundColor: 'rgba(22, 21, 24, 0.9)',
+    borderRadius: 30,
     padding: 32,
     alignItems: 'center',
-    shadowColor: '#FF6B00',
-    shadowOpacity: 0.3,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 12,
+    ...THEME.shadow.glowAccent,
   },
   ringingCatRing: {
     width: 140,
     height: 140,
     borderRadius: 70,
-    backgroundColor: 'rgba(255, 107, 0, 0.08)',
-    borderWidth: 2,
-    borderColor: '#FF6B00',
+    backgroundColor: THEME.glass.accentStrong,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 28,
     shadowColor: '#FF6B00',
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
+    shadowOpacity: 0.55,
+    shadowRadius: 28,
     shadowOffset: { width: 0, height: 0 },
+    elevation: 10,
   },
   ringingCatGlow: {
     width: 84,
@@ -4648,28 +4308,156 @@ const styles = StyleSheet.create({
   },
   ringingButton: {
     flex: 1,
-    height: 52,
-    borderRadius: 14,
+    height: 54,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1.5,
   },
   ringingSnoozeBtn: {
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    borderColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: THEME.glass.surfaceStrong,
   },
   ringingDismissBtn: {
     backgroundColor: '#FF6B00',
-    borderColor: '#FF6B00',
-    shadowColor: '#FF6B00',
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
+    ...THEME.shadow.glowAccent,
   },
   ringingBtnText: {
     color: '#FFFFFF',
     fontWeight: '800',
     fontSize: 14,
     letterSpacing: 1.5,
+  },
+
+  // ---- Navigation / Todo / Complaint / Updates additions -------------------
+  backRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    alignSelf: 'flex-start',
+  },
+  backRowText: {
+    color: '#F18F2E',
+    fontSize: 14,
+    fontWeight: '700',
+    marginLeft: 4,
+  },
+  navGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  navCard: {
+    width: '48%',
+    backgroundColor: THEME.glass.inset,
+    borderRadius: THEME.borderRadius.md,
+    paddingVertical: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    ...THEME.shadow.soft,
+  },
+  navCardLabel: {
+    color: '#E5E0DC',
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: 8,
+    letterSpacing: 0.3,
+  },
+  vocabWord: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '800',
+    marginTop: 6,
+  },
+  vocabMeaning: {
+    color: '#E5E0DC',
+    fontSize: 14,
+    marginTop: 6,
+    lineHeight: 20,
+  },
+  vocabExample: {
+    color: '#A9A09A',
+    fontSize: 13,
+    fontStyle: 'italic',
+    marginTop: 8,
+  },
+  statusChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    marginLeft: 8,
+  },
+  ticketRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: THEME.glass.inset,
+    borderRadius: 14,
+    padding: 14,
+    marginTop: 10,
+  },
+  ticketTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  replyBubble: {
+    borderRadius: 14,
+    padding: 10,
+    maxWidth: '88%',
+  },
+  replyMine: {
+    backgroundColor: 'rgba(241,143,46,0.16)',
+    alignSelf: 'flex-end',
+  },
+  replyTheirs: {
+    backgroundColor: THEME.glass.inset,
+    alignSelf: 'flex-start',
+  },
+  secondaryButton: {
+    height: 46,
+    borderRadius: THEME.borderRadius.sm,
+    backgroundColor: THEME.glass.inset,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secondaryBtnText: {
+    color: '#E5E0DC',
+    fontWeight: '700',
+    fontSize: 13,
+    letterSpacing: 0.3,
+  },
+  updateEntry: {
+    backgroundColor: THEME.glass.inset,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 10,
+  },
+  updateVersion: {
+    color: '#F18F2E',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  updateDate: {
+    color: '#A9A09A',
+    fontSize: 11,
+  },
+  updateTitle: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  updateBody: {
+    color: '#E5E0DC',
+    fontSize: 13,
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  unseenDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#E74627',
+    marginLeft: 8,
   },
 });

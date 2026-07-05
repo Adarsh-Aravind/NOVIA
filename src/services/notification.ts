@@ -1,6 +1,12 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
+// Notification channels used across the app.
+export const PRIORITY_CHANNEL = 'priority-channel';
+export const REMINDERS_CHANNEL = 'reminders-channel';
+
+type ChannelId = typeof PRIORITY_CHANNEL | typeof REMINDERS_CHANNEL;
+
 // Set up the default handler configuration
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -14,26 +20,21 @@ Notifications.setNotificationHandler({
 
 export async function configureNotificationsAsync() {
   if (Platform.OS === 'android') {
-    // 1. High-Priority Alarm channel (Bypasses silent profile and DND if configured)
-    await Notifications.setNotificationChannelAsync('alarm-channel-v2', {
-      name: 'NOVIA Sync Alarms',
-      description: 'Simultaneous & Coordinated couples alarms to sync waking up.',
-      importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250, 500, 250, 500],
-      lightColor: '#D4AF37', // Gold base
+    // 1. High-priority channel — todo reminders, daily vocabulary, update alerts.
+    await Notifications.setNotificationChannelAsync(PRIORITY_CHANNEL, {
+      name: 'NOVIA Reminders',
+      description: 'Todo reminders, the daily word, and update alerts.',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#F18F2E',
       sound: 'default',
-      bypassDnd: true, // Bypass Do Not Disturb profile
       showBadge: true,
-      audioAttributes: {
-        usage: Notifications.AndroidAudioUsage.ALARM,
-        contentType: Notifications.AndroidAudioContentType.SONIFICATION,
-      },
     });
 
-    // 2. Standard Reminders channel
-    await Notifications.setNotificationChannelAsync('reminders-channel', {
-      name: 'NOVIA Reminders',
-      description: 'Standard daily logs, face care, shaving reminders.',
+    // 2. Standard channel — quieter shared reminders (finances, cycle).
+    await Notifications.setNotificationChannelAsync(REMINDERS_CHANNEL, {
+      name: 'NOVIA Notices',
+      description: 'Finance due-dates and cycle reminders.',
       importance: Notifications.AndroidImportance.DEFAULT,
       showBadge: true,
     });
@@ -55,13 +56,13 @@ export async function scheduleLocalNotification({
   title,
   body,
   trigger,
-  channelId = 'reminders-channel',
+  channelId = REMINDERS_CHANNEL,
   data = {},
 }: {
   title: string;
   body: string;
   trigger: Notifications.NotificationTriggerInput;
-  channelId?: 'alarm-channel-v2' | 'reminders-channel';
+  channelId?: ChannelId;
   data?: Record<string, any>;
 }) {
   // Enrich trigger block with channelId so Android maps the alert to the correct channel
@@ -77,7 +78,7 @@ export async function scheduleLocalNotification({
       title,
       body,
       data,
-      sound: channelId === 'alarm-channel-v2' ? 'default' : undefined,
+      sound: 'default',
       categoryIdentifier: channelId,
     },
     trigger: enrichedTrigger,
@@ -101,13 +102,13 @@ export async function scheduleSharedReminder({
   title,
   body,
   date,
-  channelId = 'reminders-channel',
+  channelId = REMINDERS_CHANNEL,
 }: {
   reminderKey: string;
   title: string;
   body: string;
   date: Date;
-  channelId?: 'alarm-channel-v2' | 'reminders-channel';
+  channelId?: ChannelId;
 }) {
   if (date.getTime() <= Date.now()) return null;
 
@@ -123,15 +124,3 @@ export async function scheduleSharedReminder({
 export async function cancelAllScheduledNotifications() {
   await Notifications.cancelAllScheduledNotificationsAsync();
 }
-
-export async function getAlarmChannelDndBypassGranted(): Promise<boolean> {
-  if (Platform.OS !== 'android') return true;
-  try {
-    const channel = await Notifications.getNotificationChannelAsync('alarm-channel-v2');
-    return !!(channel && channel.bypassDnd);
-  } catch (error) {
-    console.warn('Error checking alarm channel DND bypass:', error);
-    return false;
-  }
-}
-

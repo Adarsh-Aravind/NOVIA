@@ -16,50 +16,46 @@ export interface Profile {
   updated_at: string;
 }
 
-export interface Reminder {
+export type TodoRecurrence = 'once' | 'weekly' | 'monthly' | 'yearly';
+
+export interface Todo {
   id: string;
   couple_id: string;
   title: string;
-  category: 'face_care' | 'shaving' | 'birthday' | 'habit' | 'document_renewal';
-  due_date: string;
+  notes: string | null;
+  due_at: string; // ISO timestamp — chosen reminder time / first fire
+  recurrence: TodoRecurrence;
   is_completed: boolean;
-  recurrence: 'daily' | 'weekly' | 'monthly' | 'yearly' | 'none';
-  metadata: {
-    document_type?: string;
-    days_warning?: number[];
-    has_alarm?: boolean;
-    alarm_time?: string;
-  };
   created_by: string;
   created_at: string;
 }
 
-export interface Alarm {
+export interface Complaint {
   id: string;
   couple_id: string;
-  purpose: string | null;
-  alarm_time: string; // "HH:MM:SS"
-  days_active: number[]; // 0-6
-  is_enabled: boolean;
-  sync_mode: 'simultaneous' | 'coordinated';
-  last_fired: string | null;
-  user_1_status: 'idle' | 'ringing' | 'snoozed' | 'dismissed' | 'failed';
-  user_2_status: 'idle' | 'ringing' | 'snoozed' | 'dismissed' | 'failed';
-  snooze_count_1: number;
-  snooze_count_2: number;
+  created_by: string;
+  title: string;
+  body: string;
+  status: 'open' | 'resolved';
+  created_at: string;
   updated_at: string;
 }
 
-export interface Punishment {
+export interface ComplaintReply {
   id: string;
+  complaint_id: string;
   couple_id: string;
-  offender_id: string;
-  source: 'alarm_skip' | 'repayment_missed';
-  penalty_type: 'visual_restriction' | 'penalty_status' | 'forfeit';
-  description: string;
-  is_active: boolean;
+  author_id: string;
+  body: string;
   created_at: string;
-  resolved_at: string | null;
+}
+
+export interface AppUpdate {
+  id: string;
+  version: string;
+  title: string;
+  body: string;
+  created_at: string;
 }
 
 export interface SharedNote {

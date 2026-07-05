@@ -11,9 +11,10 @@ DROP TABLE IF EXISTS public.periods CASCADE;
 DROP TABLE IF EXISTS public.finances CASCADE;
 DROP TABLE IF EXISTS public.brainstorms CASCADE;
 DROP TABLE IF EXISTS public.notes CASCADE;
-DROP TABLE IF EXISTS public.punishments CASCADE;
-DROP TABLE IF EXISTS public.alarms CASCADE;
-DROP TABLE IF EXISTS public.reminders CASCADE;
+DROP TABLE IF EXISTS public.app_updates CASCADE;
+DROP TABLE IF EXISTS public.todos CASCADE;
+DROP TABLE IF EXISTS public.complaint_replies CASCADE;
+DROP TABLE IF EXISTS public.complaints CASCADE;
 DROP TABLE IF EXISTS public.profiles CASCADE;
 DROP TABLE IF EXISTS public.couples CASCADE;
 
@@ -39,48 +40,47 @@ CREATE TABLE public.profiles (
     updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
 
--- 3. Reminders Table (Shared Reminders & Document Renewals)
-CREATE TABLE public.reminders (
+-- 3. Complaint Box (ticket + reply thread), couple-scoped
+CREATE TABLE public.complaints (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    couple_id UUID NOT NULL REFERENCES public.couples(id) ON DELETE CASCADE,
+    created_by UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    body TEXT DEFAULT ''::text NOT NULL,
+    status TEXT DEFAULT 'open'::text NOT NULL, -- 'open', 'resolved'
+    created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+CREATE TABLE public.complaint_replies (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    complaint_id UUID NOT NULL REFERENCES public.complaints(id) ON DELETE CASCADE,
+    couple_id UUID NOT NULL REFERENCES public.couples(id) ON DELETE CASCADE,
+    author_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    body TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+-- 4. Shared Todo list with recurring reminders, couple-scoped
+CREATE TABLE public.todos (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     couple_id UUID NOT NULL REFERENCES public.couples(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
-    category TEXT NOT NULL, -- 'face_care', 'shaving', 'birthday', 'habit', 'document_renewal'
-    due_date TIMESTAMPTZ NOT NULL,
+    notes TEXT,
+    due_at TIMESTAMPTZ NOT NULL, -- chosen reminder time (first fire)
+    recurrence TEXT DEFAULT 'once'::text NOT NULL, -- 'once', 'weekly', 'monthly', 'yearly'
     is_completed BOOLEAN DEFAULT FALSE NOT NULL,
-    recurrence TEXT DEFAULT 'none'::text NOT NULL, -- 'daily', 'weekly', 'monthly', 'yearly', 'none'
-    metadata JSONB DEFAULT '{}'::jsonb NOT NULL, -- e.g., { "document_type": "Passport", "days_warning": [30, 7] }
     created_by UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
 
--- 4. Shared Alarms Table (Wake-up Synchronization)
-CREATE TABLE public.alarms (
+-- 5. Global Updates / changelog (visible to every authenticated user)
+CREATE TABLE public.app_updates (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    couple_id UUID NOT NULL REFERENCES public.couples(id) ON DELETE CASCADE,
-    purpose TEXT,
-    alarm_time TIME NOT NULL, -- e.g. '07:00:00'
-    days_active INT[] DEFAULT '{}'::INT[] NOT NULL, -- 0=Sunday, 1=Monday ... 6=Saturday
-    is_enabled BOOLEAN DEFAULT TRUE NOT NULL,
-    sync_mode TEXT DEFAULT 'simultaneous'::text NOT NULL, -- 'simultaneous', 'coordinated'
-    last_fired TIMESTAMPTZ,
-    user_1_status TEXT DEFAULT 'idle'::text NOT NULL, -- 'idle', 'ringing', 'snoozed', 'dismissed', 'failed'
-    user_2_status TEXT DEFAULT 'idle'::text NOT NULL,
-    snooze_count_1 INT DEFAULT 0 NOT NULL,
-    snooze_count_2 INT DEFAULT 0 NOT NULL,
-    updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
-);
-
--- 5. Discipline & Punishments Table
-CREATE TABLE public.punishments (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    couple_id UUID NOT NULL REFERENCES public.couples(id) ON DELETE CASCADE,
-    offender_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-    source TEXT NOT NULL, -- 'alarm_skip', 'repayment_missed'
-    penalty_type TEXT DEFAULT 'penalty_status'::text NOT NULL, -- 'visual_restriction', 'penalty_status', 'forfeit'
-    description TEXT NOT NULL,
-    is_active BOOLEAN DEFAULT TRUE NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
-    resolved_at TIMESTAMPTZ
+    version TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT DEFAULT ''::text NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
 
 -- 6. Shared Notes Table (Partner-visible note cards)
@@ -203,9 +203,10 @@ CREATE TABLE public.locations (
 -- Enable RLS on all active tables
 ALTER TABLE public.couples ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.reminders ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.alarms ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.punishments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.complaints ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.complaint_replies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.todos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.app_updates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.brainstorms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.finances ENABLE ROW LEVEL SECURITY;
@@ -246,37 +247,121 @@ CREATE POLICY "Users can update their own profile"
 REVOKE UPDATE (couple_id, partner_id) ON public.profiles FROM authenticated;
 REVOKE UPDATE (couple_id, partner_id) ON public.profiles FROM anon;
 
--- Policies for Shared couple-scoped tables (Reminders, Alarms, Punishments, Notes, Brainstorms, Finances, Periods, Bucket List)
-CREATE POLICY "Allow access to couple data"
-    ON public.reminders FOR ALL
+-- Policies for Shared couple-scoped tables. Reads are couple-scoped; writes
+-- additionally bind the author column to auth.uid() on INSERT so a client
+-- cannot forge created_by / author_id / updated_by to impersonate its partner.
+-- UPDATE only re-checks the couple so partner-side actions (resolving a
+-- complaint, ticking a shared todo) keep working.
+CREATE POLICY "Read couple complaints"
+    ON public.complaints FOR SELECT
+    USING (couple_id = public.get_couple_id());
+CREATE POLICY "Insert couple complaints"
+    ON public.complaints FOR INSERT
+    WITH CHECK (couple_id = public.get_couple_id() AND created_by = auth.uid());
+CREATE POLICY "Update couple complaints"
+    ON public.complaints FOR UPDATE
+    USING (couple_id = public.get_couple_id())
+    WITH CHECK (couple_id = public.get_couple_id());
+CREATE POLICY "Delete couple complaints"
+    ON public.complaints FOR DELETE
     USING (couple_id = public.get_couple_id());
 
-CREATE POLICY "Allow access to couple alarms"
-    ON public.alarms FOR ALL
+CREATE POLICY "Read couple complaint replies"
+    ON public.complaint_replies FOR SELECT
+    USING (couple_id = public.get_couple_id());
+CREATE POLICY "Insert couple complaint replies"
+    ON public.complaint_replies FOR INSERT
+    WITH CHECK (couple_id = public.get_couple_id() AND author_id = auth.uid());
+CREATE POLICY "Update couple complaint replies"
+    ON public.complaint_replies FOR UPDATE
+    USING (couple_id = public.get_couple_id())
+    WITH CHECK (couple_id = public.get_couple_id());
+CREATE POLICY "Delete couple complaint replies"
+    ON public.complaint_replies FOR DELETE
     USING (couple_id = public.get_couple_id());
 
-CREATE POLICY "Allow access to punishments"
-    ON public.punishments FOR ALL
+CREATE POLICY "Read couple todos"
+    ON public.todos FOR SELECT
+    USING (couple_id = public.get_couple_id());
+CREATE POLICY "Insert couple todos"
+    ON public.todos FOR INSERT
+    WITH CHECK (couple_id = public.get_couple_id() AND created_by = auth.uid());
+CREATE POLICY "Update couple todos"
+    ON public.todos FOR UPDATE
+    USING (couple_id = public.get_couple_id())
+    WITH CHECK (couple_id = public.get_couple_id());
+CREATE POLICY "Delete couple todos"
+    ON public.todos FOR DELETE
     USING (couple_id = public.get_couple_id());
 
-CREATE POLICY "Allow access to shared notes"
-    ON public.notes FOR ALL
+-- Changelog is world-readable to any signed-in user; writes are dev-only (SQL editor).
+CREATE POLICY "Authenticated users can read updates"
+    ON public.app_updates FOR SELECT
+    TO authenticated
+    USING (true);
+
+CREATE POLICY "Read shared notes"
+    ON public.notes FOR SELECT
+    USING (couple_id = public.get_couple_id());
+CREATE POLICY "Insert shared notes"
+    ON public.notes FOR INSERT
+    WITH CHECK (
+        couple_id = public.get_couple_id()
+        AND created_by = auth.uid()
+        AND updated_by = auth.uid()
+    );
+CREATE POLICY "Update shared notes"
+    ON public.notes FOR UPDATE
+    USING (couple_id = public.get_couple_id())
+    WITH CHECK (couple_id = public.get_couple_id() AND updated_by = auth.uid());
+CREATE POLICY "Delete shared notes"
+    ON public.notes FOR DELETE
     USING (couple_id = public.get_couple_id());
 
-CREATE POLICY "Allow access to brainstorms"
-    ON public.brainstorms FOR ALL
+CREATE POLICY "Read brainstorms"
+    ON public.brainstorms FOR SELECT
+    USING (couple_id = public.get_couple_id());
+CREATE POLICY "Insert brainstorms"
+    ON public.brainstorms FOR INSERT
+    WITH CHECK (couple_id = public.get_couple_id() AND created_by = auth.uid());
+CREATE POLICY "Update brainstorms"
+    ON public.brainstorms FOR UPDATE
+    USING (couple_id = public.get_couple_id())
+    WITH CHECK (couple_id = public.get_couple_id());
+CREATE POLICY "Delete brainstorms"
+    ON public.brainstorms FOR DELETE
     USING (couple_id = public.get_couple_id());
 
-CREATE POLICY "Allow access to financial logs"
-    ON public.finances FOR ALL
+CREATE POLICY "Read financial logs"
+    ON public.finances FOR SELECT
+    USING (couple_id = public.get_couple_id());
+CREATE POLICY "Insert financial logs"
+    ON public.finances FOR INSERT
+    WITH CHECK (couple_id = public.get_couple_id() AND created_by = auth.uid());
+CREATE POLICY "Update financial logs"
+    ON public.finances FOR UPDATE
+    USING (couple_id = public.get_couple_id())
+    WITH CHECK (couple_id = public.get_couple_id());
+CREATE POLICY "Delete financial logs"
+    ON public.finances FOR DELETE
     USING (couple_id = public.get_couple_id());
 
 CREATE POLICY "Allow access to menstrual history"
     ON public.periods FOR ALL
     USING (couple_id = public.get_couple_id());
 
-CREATE POLICY "Allow access to bucket list items"
-    ON public.bucket_list FOR ALL
+CREATE POLICY "Read bucket list items"
+    ON public.bucket_list FOR SELECT
+    USING (couple_id = public.get_couple_id());
+CREATE POLICY "Insert bucket list items"
+    ON public.bucket_list FOR INSERT
+    WITH CHECK (couple_id = public.get_couple_id() AND created_by = auth.uid());
+CREATE POLICY "Update bucket list items"
+    ON public.bucket_list FOR UPDATE
+    USING (couple_id = public.get_couple_id())
+    WITH CHECK (couple_id = public.get_couple_id());
+CREATE POLICY "Delete bucket list items"
+    ON public.bucket_list FOR DELETE
     USING (couple_id = public.get_couple_id());
 
 -- Location sharing: both partners may READ every row in their couple, but a
@@ -307,14 +392,29 @@ CREATE POLICY "Allow access to own sleep logs"
     ON public.sleep_logs FOR ALL
     USING (user_id = auth.uid());
 
-CREATE POLICY "Allow access to own and partner medical records"
-    ON public.medical_vault FOR ALL
+-- Both partners may READ every record in the couple, but each user may only
+-- WRITE (insert/update/delete) their own rows.
+CREATE POLICY "Read own and partner medical records"
+    ON public.medical_vault FOR SELECT
     USING (
         user_id = auth.uid()
         OR user_id IN (
             SELECT id FROM public.profiles WHERE couple_id = public.get_couple_id()
         )
     );
+
+CREATE POLICY "Insert own medical records"
+    ON public.medical_vault FOR INSERT
+    WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Update own medical records"
+    ON public.medical_vault FOR UPDATE
+    USING (user_id = auth.uid())
+    WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Delete own medical records"
+    ON public.medical_vault FOR DELETE
+    USING (user_id = auth.uid());
 
 -- Triggers for Profile Creation on user sign-up
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -421,9 +521,11 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
 
 -- Database performance index optimizations for speed
 CREATE INDEX idx_profiles_couple_id ON public.profiles(couple_id);
-CREATE INDEX idx_reminders_couple_due ON public.reminders(couple_id, due_date);
+CREATE INDEX idx_complaints_couple_created ON public.complaints(couple_id, created_at DESC);
+CREATE INDEX idx_complaint_replies_complaint ON public.complaint_replies(complaint_id, created_at);
+CREATE INDEX idx_todos_couple_due ON public.todos(couple_id, due_at);
+CREATE INDEX idx_app_updates_created ON public.app_updates(created_at DESC);
 CREATE INDEX idx_finances_couple_due ON public.finances(couple_id, due_date);
-CREATE INDEX idx_alarms_couple_id ON public.alarms(couple_id);
 CREATE INDEX idx_periods_couple_start ON public.periods(couple_id, start_date);
 CREATE INDEX idx_medical_user_type ON public.medical_vault(user_id, metric_type);
 CREATE INDEX idx_locations_couple_id ON public.locations(couple_id);

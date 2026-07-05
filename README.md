@@ -7,17 +7,17 @@
 
 **NOVIA** is a premium, real-time synchronized couple's hub application built with **Expo**, **React Native**, and **Supabase**. It is designed with a striking, atmospheric space-inspired theme (neon orange glows and tactical visual grain filters) to deliver an engaging, smooth, and hyper-personalized co-presence experience.
 
-Whether it's syncing your wake-up alarms, tracking menstrual health cycles, sharing notes and brainstorms, managing mutual finances, logging medical metrics, or checking off bucket list adventures, **NOVIA** keeps you and your partner perfectly aligned.
+Whether it's raising a complaint ticket, keeping a shared todo list, learning a new word each day, tracking menstrual health cycles, sharing notes and brainstorms, managing mutual finances, logging medical metrics, or checking off bucket list adventures, **NOVIA** keeps you and your partner perfectly aligned.
 
 ---
 
 ## Features walkthrough
 
-### 1. Synchronized Alarms & Coordinated Discipline
-*  **Dual-User Real-time Sync**: Schedule joint wake-up alarms for both partners.
-*  **Coordinated or Simultaneous Wakeups**: Select `simultaneous` (both ring at once) or `coordinated` (timed offsets or sequences) waking structures.
-*  **Discipline & Punishment System**: If a partner ignores, skips, or over-snoozes their alarm, the system automatically penalizes the offender in the shared database, triggering **visual restrictions** or **fun forfeits** visible to both users!
-*  **Bypasses Android DND**: Configures a high-priority Notification Channel (`alarm-channel`) on Android which, with permission, plays high-importance alerts and bypasses silent/Do-Not-Disturb configurations to guarantee synchronization.
+### 1. Complaint Box, Shared Todos & Daily Vocabulary
+*  **Complaint Box (ticketing)**: Either partner can file a complaint with a title and description. The other partner can reply in a thread, and the ticket can be marked resolved or reopened — new complaints and replies trigger a notification for the other partner.
+*  **Shared Todo List**: Couple-scoped todos with a chosen reminder time and `once` / `weekly` / `monthly` / `yearly` recurrence. Because the list is shared and each device schedules from it, **both partners are reminded** via a local notification.
+*  **Word of the Day**: A bundled, offline vocabulary deck surfaces a new word + meaning every day (identical for both partners) as a Hub card and a daily notification.
+*  **Icon navigation**: A lean icon bottom bar (Hub · Notes · Finances · Health) with Todo, Complaint Box, Bucket List, and Location reachable as Hub cards.
 
 ### 2. Predictive Cycle & Menstrual Tracker
 *  **Smart Cycle Mathematics**: Uses historical start and end dates to calculate a running average of cycle length (sanitized for realistic 15-45 day ranges) and predict the next period, fertile window, and peak ovulation days.
@@ -48,8 +48,9 @@ Whether it's syncing your wake-up alarms, tracking menstrual health cycles, shar
 *  **Live Co-Presence Maps**: Share your exact coordinates, accuracy, and reverse-geocoded place labels with your partner seamlessly.
 *  **Opt-In Privacy**: Strict row-level security limits access to your partner only, ensuring total privacy.
 
-### 9. Over-The-Air (OTA) Updates
-*  **Seamless Delivery**: Automatically fetches and applies the latest app features and bug fixes without needing to download a new APK or wait for app store approvals.
+### 9. Over-The-Air (OTA) Updates & In-App Changelog
+*  **Seamless Delivery**: Automatically fetches and applies the latest app JS features and bug fixes without needing to download a new APK or wait for app store approvals.
+*  **What's New page**: A hand-authored, global changelog (the `app_updates` table) shown under **Settings → What's New**. Both partners see the same list, and a new entry fires an "update available" notification with its title as the reasoning. See [docs/UPDATES.md](docs/UPDATES.md) for how to publish an entry via the Supabase SQL editor.
 
 ---
 
@@ -60,7 +61,7 @@ Whether it's syncing your wake-up alarms, tracking menstrual health cycles, shar
 *  **Styling & UI**: Vanilla React Native StyleSheet with high-fidelity `react-native-svg` atmospheric shaders and a custom fractal grain noise filter overlay
 *  **Local Storage**: `@react-native-async-storage/async-storage`
 *  **Icons**: `lucide-react-native`
-*  **Alarm & Notification Engine**: `@notifee/react-native` for exact full-screen wake-up alarms, plus `expo-notifications` for reminders
+*  **Notification Engine**: `expo-notifications` for scheduled todo reminders, the daily vocabulary word, and update alerts
 
 ---
 
@@ -85,38 +86,39 @@ erDiagram
     text current_mood
     timestamptz mood_updated_at
   }
-  REMINDERS {
+  COMPLAINTS {
+    uuid id PK
+    uuid couple_id FK
+    uuid created_by FK
+    text title
+    text body
+    text status
+    timestamptz created_at
+  }
+  COMPLAINT_REPLIES {
+    uuid id PK
+    uuid complaint_id FK
+    uuid couple_id FK
+    uuid author_id FK
+    text body
+    timestamptz created_at
+  }
+  TODOS {
     uuid id PK
     uuid couple_id FK
     text title
-    text category
-    timestamptz due_date
-    boolean is_completed
+    text notes
+    timestamptz due_at
     text recurrence
-    jsonb metadata
+    boolean is_completed
     uuid created_by FK
   }
-  ALARMS {
+  APP_UPDATES {
     uuid id PK
-    uuid couple_id FK
-    text purpose
-    time alarm_time
-    int_array days_active
-    boolean is_enabled
-    text sync_mode
-    text user_1_status
-    text user_2_status
-    int snooze_count_1
-    int snooze_count_2
-  }
-  PUNISHMENTS {
-    uuid id PK
-    uuid couple_id FK
-    uuid offender_id FK
-    text source
-    text penalty_type
-    text description
-    boolean is_active
+    text version
+    text title
+    text body
+    timestamptz created_at
   }
   NOTES {
     uuid id PK
@@ -164,17 +166,20 @@ erDiagram
   }
 
   COUPLES ||--o{ PROFILES : "links"
-  COUPLES ||--o{ REMINDERS : "belongs_to"
-  COUPLES ||--o{ ALARMS : "belongs_to"
-  COUPLES ||--o{ PUNISHMENTS : "belongs_to"
+  COUPLES ||--o{ COMPLAINTS : "belongs_to"
+  COUPLES ||--o{ COMPLAINT_REPLIES : "belongs_to"
+  COUPLES ||--o{ TODOS : "belongs_to"
   COUPLES ||--o{ NOTES : "belongs_to"
   COUPLES ||--o{ FINANCES : "belongs_to"
   COUPLES ||--o{ PERIODS : "belongs_to"
   COUPLES ||--o{ BUCKET_LIST : "belongs_to"
   COUPLES ||--o{ LOCATIONS : "belongs_to"
-  PROFILES ||--o{ PUNISHMENTS : "commits"
+  COMPLAINTS ||--o{ COMPLAINT_REPLIES : "has_thread"
+  PROFILES ||--o{ COMPLAINTS : "files"
   PROFILES ||--|| LOCATIONS : "has_current"
 ```
+
+> `APP_UPDATES` is a global (non-couple-scoped) changelog table readable by every authenticated user.
 
 ### Row-Level Security (RLS) & Multi-Tenancy
 All data is secured at the database layer using Postgres RLS policies. 
@@ -186,10 +191,10 @@ All data is secured at the database layer using Postgres RLS policies.
     SELECT couple_id FROM public.profiles WHERE id = auth.uid();
   $$ LANGUAGE sql SECURITY DEFINER;
   ```
-2. **Access Policies**: The shared tables (Notes, Alarms, Finances, Periods, Bucket List, Reminders) restrict read/write access to only users matching the partner couple ID:
+2. **Access Policies**: The shared tables (Notes, Complaints, Todos, Finances, Periods, Bucket List) restrict read/write access to only users matching the partner couple ID:
   ```sql
-  CREATE POLICY "Allow access to couple data"
-    ON public.reminders FOR ALL
+  CREATE POLICY "Allow access to couple todos"
+    ON public.todos FOR ALL
     USING (couple_id = public.get_couple_id());
   ```
 3. **Automatic Profile Creation Trigger**: An auth trigger is installed so that whenever a user signs up through Supabase Auth, a corresponding row in the public `profiles` table is automatically provisioned:
@@ -224,8 +229,9 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anonymous-key
 
 ### 3. Database Migration (Supabase)
 1. Go to your **Supabase Dashboard** -> **SQL Editor**.
-2. Paste the contents of the `schema.sql` file located in the root of this project.
-3. Click **Run** to execute and initialize all tables, RLS policies, custom helper functions, auth triggers, and database performance indexes.
+2. For a fresh project, paste and **Run** the contents of `schema.sql` (root of this project) to initialize all tables, RLS policies, helper functions, auth triggers, and indexes.
+3. For an existing 2.0 install upgrading to 2.1, instead run `supabase/migrations/20260705_complaints_todos_updates.sql`, which drops the retired alarm tables and creates `complaints`, `complaint_replies`, `todos`, and `app_updates`.
+4. To publish changelog entries for the in-app **What's New** page, see [docs/UPDATES.md](docs/UPDATES.md).
 
 ### 4. Run Locally
 Start the Expo development server:
@@ -242,12 +248,13 @@ npm run start
 
 ```
 ├── .expo/               # Expo cache and system configuration
-├── assets/              # Static media resources, adaptive icons, and sound files
-├── plugins/             # Custom Expo config plugins (e.g., fullscreen alarm intents)
+├── assets/              # Static media resources and adaptive icons
+├── docs/                # Author guides (e.g., UPDATES.md — publishing changelog entries)
+├── supabase/            # SQL migrations (incl. the 2.1 complaints/todos/updates migration)
 ├── src/
-│   ├── constants/       # App themes, styling variables, and offline first aid database
-│   ├── hooks/           # Custom React hooks (location, notes, alarms, period cycle math)
-│   ├── services/        # Services for alarms, location tracking, OTA updates, and Supabase
+│   ├── constants/       # App themes, offline first-aid data, and the vocabulary deck
+│   ├── hooks/           # Custom React hooks (location, notes, todos, complaints, period cycle math)
+│   ├── services/        # Services for notifications, location tracking, OTA/updates, and Supabase
 │   ├── types/           # Core TypeScript type definitions and interfaces
 │   └── utils/           # Helper calculations, blood pressure/sugar validators, and debouncers
 ├── App.tsx              # Core app component housing all navigations, states, and tab views

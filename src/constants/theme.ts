@@ -34,10 +34,49 @@ export const THEME = {
     xl: 32
   },
   borderRadius: {
-    sm: 10,
-    md: 16,
-    lg: 22,
-    xl: 28,
+    sm: 12,
+    md: 18,
+    lg: 24,
+    xl: 30,
     round: 9999
-  }
-};
+  },
+
+  // Neumorphism + Glassmorphism design language.
+  // No hard outlines — depth is conveyed purely through translucent
+  // glass fills and soft, layered shadows.
+  glass: {
+    surface: 'rgba(255, 255, 255, 0.055)',   // resting frosted glass
+    surfaceStrong: 'rgba(255, 255, 255, 0.085)', // raised / hovered glass
+    inset: 'rgba(0, 0, 0, 0.22)',            // carved-in fields (inputs)
+    accent: 'rgba(231, 70, 39, 0.14)',       // active / selected glass tint
+    accentStrong: 'rgba(231, 70, 39, 0.20)',
+    danger: 'rgba(231, 76, 60, 0.12)',
+    success: 'rgba(46, 204, 113, 0.10)',
+  },
+
+  // Soft-UI shadow presets. Large, diffuse, dark drop shadows lift the
+  // glass off the deep-black backdrop like extruded neumorphic panels.
+  shadow: {
+    soft: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.34,
+      shadowRadius: 20,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 6,
+    },
+    lifted: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.42,
+      shadowRadius: 30,
+      shadowOffset: { width: 0, height: 20 },
+      elevation: 10,
+    },
+    glowAccent: {
+      shadowColor: '#E74627',
+      shadowOpacity: 0.5,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 10 },
+      elevation: 9,
+    },
+  },
+} as const;

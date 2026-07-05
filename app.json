@@ -2,12 +2,12 @@
   "expo": {
     "name": "NOVIA",
     "slug": "noviris",
-    "version": "1.0.0",
+    "version": "2.1.0",
     "orientation": "portrait",
-    "icon": "./assets/cat.png",
+    "icon": "./assets/novia-icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "runtimeVersion": "2.0.0",
+    "runtimeVersion": "2.1.0",
     "updates": {
       "url": "https://u.expo.dev/928a233f-606a-412b-9b2a-6c9e57eba586",
       "checkAutomatically": "ON_LOAD",
@@ -29,8 +29,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/cat.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/novia-adaptive.png",
+        "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -40,32 +40,17 @@
       },
       "package": "com.iitznova.novia",
       "permissions": [
-        "android.permission.SCHEDULE_EXACT_ALARM",
-        "android.permission.USE_EXACT_ALARM",
-        "android.permission.WAKE_LOCK",
         "android.permission.VIBRATE",
         "android.permission.POST_NOTIFICATIONS",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
-        "android.permission.USE_FULL_SCREEN_INTENT",
-        "android.permission.TURN_SCREEN_ON",
-        "android.permission.DISABLE_KEYGUARD",
-        "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION"
       ]
     },
-    "web": { "favicon": "./assets/favicon.png" },
+    "web": { "favicon": "./assets/novia-favicon.png" },
     "extra": { "eas": { "projectId": "928a233f-606a-412b-9b2a-6c9e57eba586" } },
     "plugins": [
-      "./plugins/withAlarmFullScreen",
       "expo-audio",
-      [
-        "expo-notifications",
-        {
-          "sounds": [ "./assets/sounds/alarm.wav" ]
-        }
-      ],
+      "expo-notifications",
       [
         "expo-location",
         {
@@ -81,7 +66,8 @@
             "targetSdkVersion": 35
           }
         }
-      ]
+      ],
+      "expo-secure-store"
     ]
   }
 }
