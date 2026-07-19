@@ -7,7 +7,7 @@
     "icon": "./assets/novia-icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "runtimeVersion": "2.1.0",
+    "runtimeVersion": "1",
     "updates": {
       "url": "https://u.expo.dev/928a233f-606a-412b-9b2a-6c9e57eba586",
       "checkAutomatically": "ON_LOAD",
@@ -16,12 +16,16 @@
     "splash": {
       "image": "./assets/cat2.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#0E1A11"
     },
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "UIBackgroundModes": [ "audio", "fetch", "processing" ]
+        "UIBackgroundModes": [
+          "audio",
+          "fetch",
+          "processing"
+        ]
       },
       "entitlements": {
         "com.apple.developer.usernotifications.critical-alerts": true
@@ -30,14 +34,10 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/novia-adaptive.png",
-        "backgroundColor": "#000000"
+        "backgroundColor": "#0E1A11"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "navigationBar": {
-        "backgroundColor": "#00000000",
-        "barStyle": "light"
-      },
       "package": "com.iitznova.novia",
       "permissions": [
         "android.permission.VIBRATE",
@@ -46,8 +46,14 @@
         "android.permission.ACCESS_FINE_LOCATION"
       ]
     },
-    "web": { "favicon": "./assets/novia-favicon.png" },
-    "extra": { "eas": { "projectId": "928a233f-606a-412b-9b2a-6c9e57eba586" } },
+    "web": {
+      "favicon": "./assets/novia-favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "928a233f-606a-412b-9b2a-6c9e57eba586"
+      }
+    },
     "plugins": [
       "expo-audio",
       "expo-notifications",
@@ -67,7 +73,9 @@
           }
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-font",
+      "expo-asset"
     ]
   }
 }

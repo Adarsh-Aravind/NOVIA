@@ -89,8 +89,12 @@ export interface FinanceItem {
   due_date: string;
   renewal_cycle: 'monthly' | 'yearly' | 'none';
   status: 'pending' | 'paid' | 'overdue';
+  /** Personal debt — owned by created_by, excluded from shared/settlement math. */
+  is_self_liability: boolean;
+  last_paid_at: string | null;
   created_by: string | null;
   created_at: string;
+  updated_at: string;
 }
 
 export interface PeriodRecord {

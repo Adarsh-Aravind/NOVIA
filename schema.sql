@@ -117,8 +117,13 @@ CREATE TABLE public.finances (
     due_date TIMESTAMPTZ NOT NULL,
     renewal_cycle TEXT DEFAULT 'none'::text NOT NULL, -- 'monthly', 'yearly', 'none'
     status TEXT DEFAULT 'pending'::text NOT NULL, -- 'pending', 'paid', 'overdue'
+    -- Personal debt owned by created_by: excluded from shared totals and from
+    -- the who-owes-whom settlement.
+    is_self_liability BOOLEAN DEFAULT FALSE NOT NULL,
+    last_paid_at TIMESTAMPTZ, -- last settlement; recurring items roll due_date forward
     created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
     CONSTRAINT check_lender_borrower CHECK (
         (type = 'borrowing' AND lender_id IS NOT NULL AND borrower_id IS NOT NULL) OR
         (type = 'subscription')

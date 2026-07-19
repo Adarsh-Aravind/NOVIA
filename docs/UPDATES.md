@@ -53,3 +53,50 @@ delete from public.app_updates where version = '2.1.1';
 
 Entries are shown newest first, by `created_at`. You don't need to set `created_at`;
 it defaults to now.
+
+---
+
+# Shipping actual code changes (OTA)
+
+The changelog above is just text. To ship real JS/asset changes without anyone
+reinstalling the APK:
+
+```bash
+eas update --channel production --message "Fix finance totals"
+```
+
+Installed apps pick this up at the next cold start, and now also when the app is
+brought back to the foreground (it downloads quietly and offers a "Restart now"
+banner rather than reloading under you).
+
+## runtimeVersion — the thing that decides whether OTA reaches anyone
+
+`app.json` sets `"runtimeVersion": "1"`, deliberately **decoupled from
+`version`**.
+
+An update is only delivered to builds whose `runtimeVersion` matches exactly.
+Previously this was pinned to `"2.1.0"` — the same value as `version` — so every
+time the app version was bumped, every already-installed build was orphaned from
+its update channel and the only way to ship anything was a reinstall.
+
+The rules now:
+
+- **JS / styles / layout / business logic only** → just `eas update`. Leave
+  `runtimeVersion` alone. Bump `version` as much as you like.
+- **Native change** (new native dependency, changed `plugins`, changed
+  `expo-build-properties`, SDK upgrade) → bump `runtimeVersion` to `"2"`, run
+  `eas build`, and install the new APK. OTA cannot carry native code.
+
+We use a hand-managed string rather than the `fingerprint` policy on purpose:
+`android/` and `ios/` are listed in `.easignore` (EAS regenerates them via
+prebuild), but they exist locally from `expo run:android`. A fingerprint computed
+on this machine at publish time can therefore disagree with the one computed on
+EAS at build time, which silently sends updates to a runtime nobody is running.
+A fixed string has no such failure mode.
+
+## One-time migration
+
+The build currently on your phones was made with `runtimeVersion: "2.1.0"`. It
+will **not** receive updates published under `"1"`. You need one final
+`eas build` + install; after that, `eas update` works across version bumps and
+the reinstall treadmill is over.

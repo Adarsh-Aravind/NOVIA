@@ -2,6 +2,7 @@ import * as Updates from 'expo-updates';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 import { AppUpdate } from '../types';
+import { withLock } from '../utils/asyncLock';
 
 const LAST_SEEN_UPDATE_KEY = 'novia:lastSeenUpdateAt';
 
@@ -52,26 +53,63 @@ export function unseenUpdates(updates: AppUpdate[], lastSeenAt: string | null): 
 }
 
 /**
- * Over-the-air (EAS Update) check. Runs on app launch in production builds:
- * if a newer JS bundle has been published to this build's channel, it is
- * fetched and applied with a quick reload. Never throws — update problems must
- * not block normal app usage.
+ * Over-the-air (EAS Update) check, run once at cold start.
  *
- * NOTE: OTA only ships JS/asset changes. Anything that touches native code or
- * adds a native dependency still requires a new `eas build`, and (if native
- * changed) a bump of `runtimeVersion` in app.json.
+ * At launch the user hasn't started doing anything yet, so fetching and
+ * reloading straight away is invisible rather than disruptive.
+ *
+ * NOTE: OTA only ships JS/asset changes. Anything touching native code still
+ * needs a fresh `eas build` — `runtimeVersion` uses the `fingerprint` policy,
+ * so it changes automatically when (and only when) the native runtime does.
  */
 export async function checkAndApplyUpdate(): Promise<void> {
   // No embedded update system while running in Expo Go / dev client hot-reload.
   if (__DEV__ || !Updates.isEnabled) return;
 
-  try {
-    const result = await Updates.checkForUpdateAsync();
-    if (result.isAvailable) {
-      await Updates.fetchUpdateAsync();
-      await Updates.reloadAsync();
+  return withLock('ota', async () => {
+    try {
+      const result = await Updates.checkForUpdateAsync();
+      if (result.isAvailable) {
+        await Updates.fetchUpdateAsync();
+        await Updates.reloadAsync();
+      }
+    } catch (e) {
+      console.log('[Updates] OTA launch check failed (ignored):', e);
     }
+  });
+}
+
+/**
+ * Check for and download an update *without* reloading.
+ *
+ * Used on foreground resume: yanking the bundle out from under someone who is
+ * mid-sentence in a shared note would lose their work, so the download happens
+ * quietly and the UI offers a restart when it's ready.
+ *
+ * Returns true when a new bundle is downloaded and waiting to be applied.
+ */
+export async function fetchUpdateInBackground(): Promise<boolean> {
+  if (__DEV__ || !Updates.isEnabled) return false;
+
+  return withLock('ota', async () => {
+    try {
+      const result = await Updates.checkForUpdateAsync();
+      if (!result.isAvailable) return false;
+
+      const fetched = await Updates.fetchUpdateAsync();
+      return fetched.isNew;
+    } catch (e) {
+      console.log('[Updates] OTA background check failed (ignored):', e);
+      return false;
+    }
+  });
+}
+
+/** Apply an already-downloaded update. Safe to call from a button handler. */
+export async function applyPendingUpdate(): Promise<void> {
+  try {
+    await Updates.reloadAsync();
   } catch (e) {
-    console.log('[Updates] OTA check failed (ignored):', e);
+    console.log('[Updates] Reload failed (ignored):', e);
   }
 }

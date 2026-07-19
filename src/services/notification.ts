@@ -26,7 +26,7 @@ export async function configureNotificationsAsync() {
       description: 'Todo reminders, the daily word, and update alerts.',
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#F18F2E',
+      lightColor: '#A7C957',
       sound: 'default',
       showBadge: true,
     });
