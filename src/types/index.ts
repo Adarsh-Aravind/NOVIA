@@ -58,6 +58,30 @@ export interface AppUpdate {
   created_at: string;
 }
 
+export type MilestoneRecurrence = 'yearly' | 'monthly' | 'once';
+
+export interface Milestone {
+  id: string;
+  couple_id: string;
+  title: string;
+  milestone_date: string; // 'YYYY-MM-DD' — the original date
+  recurrence: MilestoneRecurrence;
+  emoji: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface CheckIn {
+  id: string;
+  couple_id: string;
+  user_id: string;
+  check_in_date: string; // 'YYYY-MM-DD'
+  feeling: string;       // emoji glyph
+  gratitude: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SharedNote {
   id: string;
   couple_id: string;
@@ -66,6 +90,8 @@ export interface SharedNote {
   updated_by: string;
   created_at: string;
   updated_at: string;
+  /** Map of userId -> emoji. Each partner has at most one reaction per note. */
+  reactions?: Record<string, string>;
 }
 
 export interface Brainstorm {

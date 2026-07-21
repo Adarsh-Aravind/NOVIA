@@ -2,6 +2,8 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Clean up any existing tables to avoid duplicate relations
+DROP TABLE IF EXISTS public.check_ins CASCADE;
+DROP TABLE IF EXISTS public.milestones CASCADE;
 DROP TABLE IF EXISTS public.locations CASCADE;
 DROP TABLE IF EXISTS public.bucket_list CASCADE;
 DROP TABLE IF EXISTS public.medical_vault CASCADE;
@@ -90,6 +92,8 @@ CREATE TABLE public.notes (
     content TEXT DEFAULT ''::text NOT NULL,
     created_by UUID NOT NULL REFERENCES public.profiles(id),
     updated_by UUID NOT NULL REFERENCES public.profiles(id),
+    -- Emoji reactions as a { userId: emoji } map; each partner has one reaction.
+    reactions JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
@@ -201,6 +205,31 @@ CREATE TABLE public.locations (
     updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
 
+-- 14. Relationship Milestones / Anniversaries ("On this day"), couple-scoped
+CREATE TABLE public.milestones (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    couple_id UUID NOT NULL REFERENCES public.couples(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    milestone_date DATE NOT NULL,               -- the original date (e.g. first date)
+    recurrence TEXT DEFAULT 'yearly'::text NOT NULL, -- 'yearly', 'monthly', 'once'
+    emoji TEXT,
+    created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+-- 15. Daily Check-in / Gratitude (one row per user per day), couple-scoped
+CREATE TABLE public.check_ins (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    couple_id UUID NOT NULL REFERENCES public.couples(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    check_in_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    feeling TEXT NOT NULL,          -- an emoji glyph, e.g. '😊'
+    gratitude TEXT,                 -- optional "one thing I'm grateful for"
+    created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    CONSTRAINT uniq_checkin_per_day UNIQUE (user_id, check_in_date)
+);
+
 ---
 --- ROW LEVEL SECURITY & RELATIONAL ACCESS POLICIES
 ---
@@ -221,6 +250,8 @@ ALTER TABLE public.sleep_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.medical_vault ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bucket_list ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.locations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.milestones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.check_ins ENABLE ROW LEVEL SECURITY;
 
 -- Helper Function to resolve current user's active couple ID
 CREATE OR REPLACE FUNCTION public.get_couple_id()
@@ -388,6 +419,37 @@ CREATE POLICY "Delete own location"
     ON public.locations FOR DELETE
     USING (user_id = auth.uid());
 
+-- Milestones: couple-scoped reads; INSERT binds created_by to auth.uid().
+CREATE POLICY "Read couple milestones"
+    ON public.milestones FOR SELECT
+    USING (couple_id = public.get_couple_id());
+CREATE POLICY "Insert couple milestones"
+    ON public.milestones FOR INSERT
+    WITH CHECK (couple_id = public.get_couple_id() AND created_by = auth.uid());
+CREATE POLICY "Update couple milestones"
+    ON public.milestones FOR UPDATE
+    USING (couple_id = public.get_couple_id())
+    WITH CHECK (couple_id = public.get_couple_id());
+CREATE POLICY "Delete couple milestones"
+    ON public.milestones FOR DELETE
+    USING (couple_id = public.get_couple_id());
+
+-- Check-ins: both partners READ every row in the couple; each user WRITES only
+-- their own rows.
+CREATE POLICY "Read couple check-ins"
+    ON public.check_ins FOR SELECT
+    USING (couple_id = public.get_couple_id());
+CREATE POLICY "Insert own check-in"
+    ON public.check_ins FOR INSERT
+    WITH CHECK (couple_id = public.get_couple_id() AND user_id = auth.uid());
+CREATE POLICY "Update own check-in"
+    ON public.check_ins FOR UPDATE
+    USING (user_id = auth.uid())
+    WITH CHECK (user_id = auth.uid() AND couple_id = public.get_couple_id());
+CREATE POLICY "Delete own check-in"
+    ON public.check_ins FOR DELETE
+    USING (user_id = auth.uid());
+
 -- Policies for Personal User-scoped tables (Diet, Sleep, Medical Records Vault)
 CREATE POLICY "Allow access to own diet logs"
     ON public.diet_logs FOR ALL
@@ -534,3 +596,5 @@ CREATE INDEX idx_finances_couple_due ON public.finances(couple_id, due_date);
 CREATE INDEX idx_periods_couple_start ON public.periods(couple_id, start_date);
 CREATE INDEX idx_medical_user_type ON public.medical_vault(user_id, metric_type);
 CREATE INDEX idx_locations_couple_id ON public.locations(couple_id);
+CREATE INDEX idx_milestones_couple_date ON public.milestones(couple_id, milestone_date);
+CREATE INDEX idx_checkins_couple_date ON public.check_ins(couple_id, check_in_date DESC);

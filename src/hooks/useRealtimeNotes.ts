@@ -131,6 +131,47 @@ export function useRealtimeNotes(coupleId: string | null, userId: string | null)
     return false;
   };
 
+  // Toggle the current user's emoji reaction on a note. Reactions live in a
+  // JSONB map (userId -> emoji) on the note row, so they ride the existing
+  // notes realtime/refresh path — no extra table or subscription. Tapping the
+  // emoji you already picked clears it; a different emoji replaces yours.
+  // We never touch updated_at, so reacting doesn't reorder the note grid.
+  const toggleReaction = async (note: SharedNote, emoji: string) => {
+    if (!userId) return;
+
+    const next = { ...(note.reactions || {}) };
+    if (next[userId] === emoji) delete next[userId];
+    else next[userId] = emoji;
+
+    // Optimistic — reflect the tap instantly.
+    setNotes((prev) => prev.map((n) => (n.id === note.id ? { ...n, reactions: next } : n)));
+
+    // RLS on notes requires the updater to own updated_by; set it to us.
+    const { error } = await supabase
+      .from('notes')
+      .update({ reactions: next, updated_by: userId })
+      .eq('id', note.id);
+
+    if (error) {
+      // The reactions column is added by a one-time migration; guide the user
+      // if it isn't there yet, then fall back to server truth.
+      if (error.code === 'PGRST204' && error.message.includes('reactions')) {
+        Alert.alert(
+          'One-time setup needed',
+          "To enable reactions on shared notes, run this in your Supabase SQL Editor:\n\nALTER TABLE public.notes ADD COLUMN IF NOT EXISTS reactions JSONB NOT NULL DEFAULT '{}'::jsonb;"
+        );
+      } else {
+        console.error('[Notes Sync] Reaction failed:', error);
+      }
+      fetchNotes();
+      return;
+    }
+
+    if (channelRef.current) {
+      channelRef.current.send({ type: 'broadcast', event: 'notes_updated', payload: {} });
+    }
+  };
+
   const removeNote = async (noteId: string) => {
     // Optimistic UI state update
     setNotes(prev => prev.filter(note => note.id !== noteId));
@@ -157,5 +198,6 @@ export function useRealtimeNotes(coupleId: string | null, userId: string | null)
     isPartnerTyping,
     addNote,
     removeNote,
+    toggleReaction,
   };
 }

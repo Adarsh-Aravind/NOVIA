@@ -41,9 +41,7 @@
       "package": "com.iitznova.novia",
       "permissions": [
         "android.permission.VIBRATE",
-        "android.permission.POST_NOTIFICATIONS",
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "web": {
@@ -56,11 +54,11 @@
     },
     "plugins": [
       "expo-audio",
-      "expo-notifications",
       [
-        "expo-location",
+        "expo-notifications",
         {
-          "locationWhenInUsePermission": "NOVIA uses your location so you can share where you are with your partner."
+          "icon": "./assets/notification-icon.png",
+          "color": "#A7C957"
         }
       ],
       [

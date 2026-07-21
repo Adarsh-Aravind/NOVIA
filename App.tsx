@@ -20,18 +20,18 @@ import {
   Image
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
-import { Menu, Settings as SettingsIcon, LogOut, X, User, Heart, Check, Square, CheckSquare, Home, FileText, Wallet, Activity, MapPin, ListChecks, MessageSquareWarning, ChevronLeft, Send, BookOpen } from 'lucide-react-native';
+import { Menu, Settings as SettingsIcon, LogOut, X, User, Heart, Check, Square, CheckSquare, Home, FileText, Wallet, Activity, ListChecks, MessageSquareWarning, ChevronLeft, Send, BookOpen, Sparkles, ScrollText, CalendarHeart, Flame } from 'lucide-react-native';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, RadialGradient, Rect, Stop, Filter, FeTurbulence, FeColorMatrix, FeComposite } from 'react-native-svg';
 import * as Notifications from 'expo-notifications';
-import { Todo, TodoRecurrence, Complaint, AppUpdate } from './src/types';
+import { Todo, TodoRecurrence, Complaint, AppUpdate, Milestone, MilestoneRecurrence } from './src/types';
 import { useAuth } from './src/hooks/useAuth';
 import { useRealtimeNotes } from './src/hooks/useRealtimeNotes';
 import { useMood } from './src/hooks/useMood';
 import { useTodos } from './src/hooks/useTodos';
 import { usePeriods } from './src/hooks/usePeriods';
 import { useComplaints } from './src/hooks/useComplaints';
-import { useLocation } from './src/hooks/useLocation';
-import { formatDistance, formatUpdatedAgo, haversineMeters, mapsUrl } from './src/services/locationService';
+import { useMilestones } from './src/hooks/useMilestones';
+import { useCheckIns } from './src/hooks/useCheckIns';
 import { configureNotificationsAsync, PRIORITY_CHANNEL } from './src/services/notification';
 import { cancelScheduledNotificationsByPrefix, scheduleSharedReminder, scheduleLocalNotification } from './src/services/notification';
 import { supabase } from './src/services/supabase';
@@ -46,9 +46,15 @@ import {
   summarizeFinances,
   toLocalISODate,
 } from './src/utils/financeMath';
+import {
+  daysUntilNext,
+  elapsedAt,
+  formatElapsed,
+  nextOccurrence,
+  occursOn,
+} from './src/utils/milestoneMath';
 import { FinanceItem } from './src/types';
 import { getWordOfDay } from './src/constants/vocabulary';
-import { FIRST_AID_DATA } from './src/constants/firstAidData';
 import { useFonts } from 'expo-font';
 import { Fraunces_600SemiBold } from '@expo-google-fonts/fraunces/600SemiBold';
 import { Fraunces_700Bold } from '@expo-google-fonts/fraunces/700Bold';
@@ -60,6 +66,21 @@ import { Manrope_800ExtraBold } from '@expo-google-fonts/manrope/800ExtraBold';
 import { FONTS, PALETTE, THEME } from './src/constants/theme';
 
 const DAY_OPTIONS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+// Quick emoji reactions available on each shared note.
+const NOTE_REACTIONS = ['❤️', '😂', '👍', '🥺', '🔥'] as const;
+
+// Daily check-in feelings, ordered brightest → lowest.
+const CHECK_IN_FEELINGS: { emoji: string; label: string }[] = [
+  { emoji: '😄', label: 'Great' },
+  { emoji: '🙂', label: 'Good' },
+  { emoji: '😐', label: 'Okay' },
+  { emoji: '😔', label: 'Low' },
+  { emoji: '😢', label: 'Rough' },
+];
+
+// Emoji palette offered when creating a milestone.
+const MILESTONE_EMOJIS = ['💛', '💍', '🌹', '🎉', '✈️', '🏡', '🎂', '⭐'] as const;
 
 const PHASE_COLORS = THEME.colors.phase;
 
@@ -574,7 +595,7 @@ const BlinkingBucketRow = ({ item, getCreatorName, onToggle, onDelete }: { item:
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'hub' | 'notes' | 'finances' | 'health' | 'bucket' | 'location' | 'todos' | 'complaints'>('hub');
+  const [activeTab, setActiveTab] = useState<'hub' | 'notes' | 'finances' | 'health' | 'bucket' | 'todos' | 'complaints' | 'milestones'>('hub');
 
   // Typefaces. Only the six weights the design actually uses are loaded — each
   // extra static face is ~95 KB of bundle for no visual gain.
@@ -637,7 +658,7 @@ export default function App() {
     await pairPartner(partnerIdInput.trim());
   };
 
-  const { notes, isPartnerTyping, addNote, removeNote } = useRealtimeNotes(coupleId, userId);
+  const { notes, isPartnerTyping, addNote, removeNote, toggleReaction } = useRealtimeNotes(coupleId, userId);
   const { currentMood, partnerMood, partnerName, updateMood } = useMood(coupleId, userId);
   const { todos, addTodo, toggleTodo, deleteTodo } = useTodos(coupleId, userId);
   const { records, predictions, addPeriodLog, refreshPeriods } = usePeriods(coupleId);
@@ -650,16 +671,14 @@ export default function App() {
     deleteComplaint,
     repliesFor,
   } = useComplaints(coupleId, userId);
+  const { milestones, addMilestone, deleteMilestone } = useMilestones(coupleId, userId);
   const {
-    myLocation,
-    partnerLocation,
-    busy: locationBusy,
-    isLive: isLiveSharing,
-    errorMessage: locationError,
-    shareOnce: shareMyLocation,
-    setLive: setLiveSharing,
-    stopSharing: stopLocationSharing,
-  } = useLocation(coupleId, userId);
+    myToday: myCheckIn,
+    partnerToday: partnerCheckIn,
+    myStreak,
+    partnerStreak,
+    submitCheckIn,
+  } = useCheckIns(coupleId, userId, partnerProfile?.id);
   const welcomeAnim = useRef(new Animated.Value(0)).current;
   const todosRef = useRef(todos);
   todosRef.current = todos;
@@ -726,8 +745,6 @@ export default function App() {
   };
 
   // Local feature states
-  const [firstAidSearch, setFirstAidSearch] = useState<string>('');
-  const [matchingFirstAid, setMatchingFirstAid] = useState<any>(null);
   const [newNoteContent, setNewNoteContent] = useState('');
   
   // Finances
@@ -745,6 +762,11 @@ export default function App() {
 
   // Period inputs
   const [isEditingCycle, setIsEditingCycle] = useState(false);
+  // Full cycle tracker (detailed prediction + editor) opens in a modal,
+  // reachable from the compact Health-tab summary and the side drawer.
+  const [isCycleModalVisible, setIsCycleModalVisible] = useState(false);
+  // Dedicated changelog viewer (side drawer -> Changelog).
+  const [isChangelogVisible, setIsChangelogVisible] = useState(false);
   const [periodStartDate, setPeriodStartDate] = useState('');
   const [periodEndDate, setPeriodEndDate] = useState('');
   const [symptoms, setSymptoms] = useState<string[]>([]);
@@ -759,7 +781,10 @@ export default function App() {
       if (!data) return;
       if (data.kind === 'todo') setActiveTab('todos');
       else if (data.kind === 'complaint') setActiveTab('complaints');
-      else if (data.kind === 'update') { setIsSettingsVisible(true); markUpdatesViewed(); }
+      else if (data.kind === 'cycle') { setActiveTab('health'); setIsCycleModalVisible(true); }
+      else if (data.kind === 'milestone') setActiveTab('milestones');
+      else if (data.kind === 'checkin') setActiveTab('hub');
+      else if (data.kind === 'update') { setIsChangelogVisible(true); markUpdatesViewed(); }
     };
     const responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
       routeFromData(response.notification.request.content.data);
@@ -771,9 +796,9 @@ export default function App() {
 
   // Calendar states
   const [isCalendarVisible, setIsCalendarVisible] = useState(false);
-  const [calendarTarget, setCalendarTarget] = useState<'periodStartDate' | 'periodEndDate' | 'hospitalDate' | 'financeDueDate' | 'todoDate' | null>(null);
+  const [calendarTarget, setCalendarTarget] = useState<'periodStartDate' | 'periodEndDate' | 'hospitalDate' | 'financeDueDate' | 'todoDate' | 'milestoneDate' | null>(null);
 
-  const openCalendarFor = (target: 'periodStartDate' | 'periodEndDate' | 'hospitalDate' | 'financeDueDate' | 'todoDate') => {
+  const openCalendarFor = (target: 'periodStartDate' | 'periodEndDate' | 'hospitalDate' | 'financeDueDate' | 'todoDate' | 'milestoneDate') => {
     setCalendarTarget(target);
     setIsCalendarVisible(true);
   };
@@ -784,6 +809,7 @@ export default function App() {
     else if (calendarTarget === 'hospitalDate') setHospitalDate(dateString);
     else if (calendarTarget === 'financeDueDate') setFinanceDueDate(dateString);
     else if (calendarTarget === 'todoDate') setTodoDate(dateString);
+    else if (calendarTarget === 'milestoneDate') setMilestoneDate(dateString);
     setIsCalendarVisible(false);
     setCalendarTarget(null);
   };
@@ -810,6 +836,16 @@ export default function App() {
     }
     setTodoMinute((current) => (current + amount + 60) % 60);
   };
+
+  // Milestone creator inputs
+  const [newMilestoneTitle, setNewMilestoneTitle] = useState('');
+  const [milestoneDate, setMilestoneDate] = useState(''); // 'YYYY-MM-DD'
+  const [milestoneRecurrence, setMilestoneRecurrence] = useState<MilestoneRecurrence>('yearly');
+  const [milestoneEmoji, setMilestoneEmoji] = useState<string>('💛');
+
+  // Daily check-in inputs (Hub card). Pre-filled from any existing entry today.
+  const [checkInFeeling, setCheckInFeeling] = useState<string>('');
+  const [checkInGratitude, setCheckInGratitude] = useState<string>('');
 
   // Complaint Box inputs
   const [newComplaintTitle, setNewComplaintTitle] = useState('');
@@ -997,15 +1033,34 @@ export default function App() {
       if (!coupleId || !predictions) return;
 
       await cancelScheduledNotificationsByPrefix(`period:${coupleId}:`);
-      const reminderDate = new Date(predictions.nextPeriodStart);
-      reminderDate.setDate(reminderDate.getDate() - 1);
-      reminderDate.setHours(9, 0, 0, 0);
 
-      await scheduleSharedReminder({
-        reminderKey: `period:${coupleId}:next`,
+      const now = Date.now();
+      const periodStart = new Date(predictions.nextPeriodStart);
+      periodStart.setHours(9, 0, 0, 0);
+
+      // Preferred: a heads-up the morning before the predicted start.
+      const dayBefore = new Date(periodStart);
+      dayBefore.setDate(dayBefore.getDate() - 1);
+
+      // Pick the soonest slot that is still in the future. If "the day before"
+      // has already passed (e.g. tracking was set up close to the date), fall
+      // back to the morning of the predicted start so a reminder still fires;
+      // only skip entirely once the predicted start itself is in the past.
+      const target =
+        dayBefore.getTime() > now ? dayBefore :
+        periodStart.getTime() > now ? periodStart :
+        null;
+      if (!target) return;
+
+      const isDayBefore = target === dayBefore;
+      await scheduleLocalNotification({
         title: 'NOVIA Cycle Reminder',
-        body: 'Predicted period starts tomorrow. Both partners have this gentle reminder.',
-        date: reminderDate,
+        body: isDayBefore
+          ? "Her period is predicted to start tomorrow. A little extra care goes a long way — you've both got this reminder."
+          : "Her period is predicted to start today. Be ready with warmth and comfort.",
+        trigger: target as any,
+        channelId: PRIORITY_CHANNEL,
+        data: { kind: 'cycle', reminderKey: `period:${coupleId}:next` },
       });
     });
 
@@ -1055,6 +1110,107 @@ export default function App() {
 
     syncTodoReminders();
   }, [todos, coupleId]);
+
+  // Milestones ("On this day"): for each, a day-of celebration plus a day-before
+  // heads-up (yearly + one-off only) so there's time to plan. Recurring dates use
+  // YEARLY/MONTHLY triggers so they fire every year/month without rescheduling;
+  // one-offs use a plain date. Both devices schedule from the same shared list.
+  useEffect(() => {
+    const scheduleMilestoneReminders = () => withLock(`milestone:${coupleId}`, async () => {
+      if (!coupleId) return;
+
+      await cancelScheduledNotificationsByPrefix(`milestone:${coupleId}:`);
+
+      const now = new Date();
+      await Promise.all(
+        milestones.flatMap((m) => {
+          const next = nextOccurrence(m, now);
+          if (!next) return []; // one-off already in the past
+
+          const label = m.emoji ? `${m.emoji} ${m.title}` : m.title;
+          const { count, unit } = elapsedAt(m, next);
+          const elapsed = formatElapsed(count, unit);
+          const jobs: (Promise<any> | null)[] = [];
+
+          // Day-of celebration.
+          let dayOfTrigger: any;
+          if (m.recurrence === 'yearly') {
+            dayOfTrigger = { type: Notifications.SchedulableTriggerInputTypes.YEARLY, month: next.getMonth() + 1, day: next.getDate(), hour: 9, minute: 0 };
+          } else if (m.recurrence === 'monthly') {
+            dayOfTrigger = { type: Notifications.SchedulableTriggerInputTypes.MONTHLY, day: next.getDate(), hour: 9, minute: 0 };
+          } else {
+            const dayOf = new Date(next);
+            dayOf.setHours(9, 0, 0, 0);
+            dayOfTrigger = dayOf.getTime() > Date.now() ? dayOf : null;
+          }
+          if (dayOfTrigger) {
+            jobs.push(scheduleLocalNotification({
+              title: `Today: ${m.title}`,
+              body: elapsed ? `${label} — ${elapsed} today. Celebrate it together.` : `${label} is today. Celebrate it together.`,
+              trigger: dayOfTrigger,
+              channelId: PRIORITY_CHANNEL,
+              data: { kind: 'milestone', reminderKey: `milestone:${coupleId}:${m.id}:day` },
+            }));
+          }
+
+          // Day-before heads-up (skip for monthly — a monthly nudge every 30 days
+          // is more nagging than helpful).
+          if (m.recurrence !== 'monthly') {
+            const before = new Date(next);
+            before.setDate(before.getDate() - 1);
+            before.setHours(9, 0, 0, 0);
+            let beforeTrigger: any;
+            if (m.recurrence === 'yearly') {
+              beforeTrigger = { type: Notifications.SchedulableTriggerInputTypes.YEARLY, month: before.getMonth() + 1, day: before.getDate(), hour: 9, minute: 0 };
+            } else {
+              beforeTrigger = before.getTime() > Date.now() ? before : null;
+            }
+            if (beforeTrigger) {
+              jobs.push(scheduleLocalNotification({
+                title: `Tomorrow: ${m.title}`,
+                body: elapsed ? `${label} is tomorrow — ${elapsed}. Time to plan something.` : `${label} is tomorrow. Time to plan something.`,
+                trigger: beforeTrigger,
+                channelId: PRIORITY_CHANNEL,
+                data: { kind: 'milestone', reminderKey: `milestone:${coupleId}:${m.id}:eve` },
+              }));
+            }
+          }
+          return jobs;
+        })
+      );
+    });
+
+    scheduleMilestoneReminders();
+  }, [milestones, coupleId]);
+
+  // Daily check-in nudge at 8pm. Schedules the next week of one-shots (rolling
+  // forward on foreground), and skips today's once this device has already
+  // checked in — so the prompt stops nagging the moment you respond.
+  useEffect(() => {
+    if (!session || !coupleId) return;
+    const scheduleCheckInReminders = () => withLock(`checkin:${coupleId}`, async () => {
+      await cancelScheduledNotificationsByPrefix('checkin:');
+      const AT_HOUR = 20;
+      const now = new Date();
+      const jobs: Promise<any>[] = [];
+      for (let i = 0; i < 7; i++) {
+        const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i, AT_HOUR, 0, 0, 0);
+        if (day.getTime() <= Date.now()) continue;
+        if (i === 0 && myCheckIn) continue; // already checked in today
+        jobs.push(
+          scheduleLocalNotification({
+            title: 'Daily check-in',
+            body: 'How are you feeling today? Share a moment of gratitude with your partner.',
+            trigger: day as any,
+            channelId: PRIORITY_CHANNEL,
+            data: { kind: 'checkin', reminderKey: `checkin:${day.toDateString()}` },
+          })
+        );
+      }
+      await Promise.all(jobs);
+    });
+    scheduleCheckInReminders();
+  }, [session, coupleId, foregroundTick, myCheckIn]);
 
   // Daily vocabulary: schedule the next 14 days of one-shot notifications, each
   // carrying that day's specific word. Rolls forward on foreground (foregroundTick).
@@ -1135,35 +1291,6 @@ export default function App() {
   const markUpdatesViewed = async () => {
     if (appUpdates.length > 0) await markUpdatesSeen(appUpdates[0].created_at);
     setHasUnseenUpdate(false);
-  };
-
-  // Offline first aid query parser
-  const handleFirstAidSearch = (text: string) => {
-    setFirstAidSearch(text);
-    if (!text.trim()) {
-      setMatchingFirstAid(null);
-      return;
-    }
-    const query = text.toLowerCase();
-    
-    // Check blood pressure queries
-    if (query.includes('blood pressure') || query.includes('bp') || query.includes('low pressure') || query.includes('dizzy')) {
-      setMatchingFirstAid(FIRST_AID_DATA.low_blood_pressure);
-    } 
-    // Check blood sugar queries
-    else if (query.includes('sugar') || query.includes('glucose') || query.includes('diabetic') || query.includes('thirst')) {
-      setMatchingFirstAid(FIRST_AID_DATA.high_blood_sugar);
-    } 
-    // Check burns
-    else if (query.includes('burn') || query.includes('blister') || query.includes('fire')) {
-      setMatchingFirstAid(FIRST_AID_DATA.minor_burns);
-    }
-    // Check heatstroke
-    else if (query.includes('heat') || query.includes('stroke') || query.includes('sweat')) {
-      setMatchingFirstAid(FIRST_AID_DATA.heat_exhaustion);
-    } else {
-      setMatchingFirstAid(null);
-    }
   };
 
   const handleAddNote = async () => {
@@ -1507,6 +1634,55 @@ export default function App() {
     setTodoRecurrence('once');
   };
 
+  // ---- Milestone handlers --------------------------------------------------
+  const handleAddMilestone = async () => {
+    if (!newMilestoneTitle.trim()) {
+      Alert.alert('Name needed', 'Name this milestone — e.g. First Date, Anniversary.');
+      return;
+    }
+    if (!milestoneDate) {
+      Alert.alert('Pick a date', 'Choose the date this milestone happened.');
+      return;
+    }
+    const created = await addMilestone({
+      title: newMilestoneTitle,
+      date: milestoneDate,
+      recurrence: milestoneRecurrence,
+      emoji: milestoneEmoji,
+    });
+    if (!created) {
+      Alert.alert('Not saved', 'NOVIA could not save this milestone. Please check connectivity.');
+      return;
+    }
+    setNewMilestoneTitle('');
+    setMilestoneDate('');
+    setMilestoneRecurrence('yearly');
+    setMilestoneEmoji('💛');
+  };
+
+  // ---- Daily check-in handlers ---------------------------------------------
+  // Keep the card's controls in sync with today's saved entry (either partner's
+  // realtime update, or this device re-submitting).
+  useEffect(() => {
+    if (myCheckIn) {
+      setCheckInFeeling(myCheckIn.feeling);
+      setCheckInGratitude(myCheckIn.gratitude || '');
+    }
+  }, [myCheckIn?.feeling, myCheckIn?.gratitude]);
+
+  const handleSubmitCheckIn = async (feeling?: string) => {
+    const chosen = feeling || checkInFeeling;
+    if (!chosen) {
+      Alert.alert('Pick a feeling', 'Tap how you feel today first.');
+      return;
+    }
+    setCheckInFeeling(chosen);
+    const saved = await submitCheckIn(chosen, checkInGratitude);
+    if (!saved) {
+      Alert.alert('Not saved', 'NOVIA could not save your check-in. Please check connectivity.');
+    }
+  };
+
   // ---- Complaint handlers --------------------------------------------------
   const handleAddComplaint = async () => {
     if (!newComplaintTitle.trim()) {
@@ -1587,124 +1763,108 @@ export default function App() {
     }
   })();
 
+  // Milestones landing today ("On this day") and the next month's upcoming ones.
+  const todayMilestones = milestones.filter((m) => occursOn(m, new Date()));
+  const upcomingMilestones = milestones
+    .map((m) => ({ m, days: daysUntilNext(m, new Date()) }))
+    .filter((x): x is { m: Milestone; days: number } => x.days !== null && x.days > 0 && x.days <= 30)
+    .sort((a, b) => a.days - b.days);
+
+  // Human-facing detail for a cycle phase. The *date math* (cycleMath) is the
+  // source of truth for which phase she is in — that's what keeps the badge in
+  // step with the cycle day and predicted dates. Symptoms never silently
+  // reassign the phase; only two direct biological markers can, because they are
+  // unambiguous real-time evidence that the date model may be a day or two off:
+  //   - active bleeding  -> Menstruation
+  //   - egg-white fluid   -> Ovulation
+  // Everything else (cramps, mood, energy) is used to colour the forecast text,
+  // not to move the phase — those occur across several phases and previously
+  // forced everyone into "Luteal" or "Follicular" regardless of the real day.
   const getCyclePhaseAndTips = (latestRecord: any, datePredictions: any) => {
-    if (!latestRecord) {
-      return {
-        phase: datePredictions?.currentPhase || 'Unknown',
-        color: '#A7C957',
-        badge: 'Neutral Phase',
-        forecast: 'No active physical symptoms logged yet. Keeping standard track!',
-        tips: 'Plan a cozy checking-in date, ask her how her day is going, and send a cute message!'
-      };
+    const symptoms: string[] = latestRecord?.symptoms || [];
+    const bleeding = symptoms.find((s) => s.startsWith('bleeding:'))?.split(':')[1] || 'none';
+    const physical = symptoms.find((s) => s.startsWith('physical:'))?.split(':')[1] || 'none';
+    const fluid = symptoms.find((s) => s.startsWith('fluid:'))?.split(':')[1] || 'none';
+    const emotion = symptoms.find((s) => s.startsWith('emotion:'))?.split(':')[1] || 'calm';
+    const energy = symptoms.find((s) => s.startsWith('energy:'))?.split(':')[1] || 'normal';
+
+    // Start from the authoritative, date-derived phase.
+    let phase: string = datePredictions?.currentPhase || 'Unknown';
+    // Direct biological markers may correct it.
+    if (bleeding !== 'none') phase = 'Menstruation';
+    else if (fluid === 'eggwhite') phase = 'Ovulation';
+
+    // Is today inside the predicted fertile window? (Drives the "Fertile" flag.)
+    let fertileNow = false;
+    if (datePredictions?.fertileWindowStart && datePredictions?.fertileWindowEnd) {
+      const t = new Date(); t.setHours(0, 0, 0, 0);
+      fertileNow =
+        t >= new Date(new Date(datePredictions.fertileWindowStart).setHours(0, 0, 0, 0)) &&
+        t <= new Date(new Date(datePredictions.fertileWindowEnd).setHours(0, 0, 0, 0));
     }
 
-    const symptoms = latestRecord.symptoms || [];
-    
-    // Find specific symptom categories
-    const bleeding = symptoms.find((s: string) => s.startsWith('bleeding:'))?.split(':')[1] || 'none';
-    const physical = symptoms.find((s: string) => s.startsWith('physical:'))?.split(':')[1] || 'none';
-    const fluid = symptoms.find((s: string) => s.startsWith('fluid:'))?.split(':')[1] || 'none';
-    const emotion = symptoms.find((s: string) => s.startsWith('emotion:'))?.split(':')[1] || 'calm';
-    const energy = symptoms.find((s: string) => s.startsWith('energy:'))?.split(':')[1] || 'normal';
+    const BADGES: Record<string, string> = {
+      Menstruation: 'Menstruation · Bleeding',
+      Follicular: 'Follicular · Rising energy',
+      Ovulation: 'Ovulation · Peak fertility',
+      Luteal: fertileNow ? 'Luteal · Fertile tail' : 'Luteal · PMS window',
+      Unknown: 'Getting to know her cycle',
+    };
+    const badge = BADGES[phase] || BADGES.Unknown;
+    const color = (PHASE_COLORS as any)[phase] || THEME.colors.primary;
 
-    let phase = datePredictions?.currentPhase || 'Unknown';
-    let badge = 'Follicular Phase';
-    let color = '#6A994E'; // tealish green
+    // A short note echoing what she actually logged, so the boyfriend sees the
+    // real-time signal alongside the model.
+    const parts: string[] = [];
+    if (bleeding !== 'none') parts.push(`${bleeding} flow`);
+    if (physical !== 'none') parts.push(physical === 'tender' ? 'tender breasts' : physical);
+    if (fluid !== 'none') parts.push(fluid === 'eggwhite' ? 'egg-white fluid' : `${fluid} fluid`);
+    if (emotion !== 'calm') parts.push(`feeling ${emotion}`);
+    if (energy !== 'normal') parts.push(`${energy} energy`);
+    const symptomNote = parts.length ? `She logged: ${parts.join(', ')}.` : 'No symptoms logged for this cycle yet.';
+
     let forecast = '';
     let tips = '';
-
-    // Rule engine for phase determination based on questionnaire
-    if (bleeding !== 'none') {
-      phase = 'Menstruation';
-      badge = 'Menstruation (Bleeding)';
-      color = '#BC4749'; // soft red
-    } else if (fluid === 'eggwhite') {
-      phase = 'Ovulation';
-      badge = 'Ovulation (High Fertility)';
-      color = '#A7C957'; // peach orange
-    } else if (
-      physical === 'cramps' || 
-      physical === 'bloating' || 
-      physical === 'tender' || 
-      emotion === 'irritable' || 
-      emotion === 'sad' || 
-      emotion === 'anxious' || 
-      energy === 'low'
-    ) {
-      phase = 'Luteal';
-      badge = 'Luteal Phase (PMS)';
-      color = '#D8B863'; // purple
-    } else {
-      phase = 'Follicular';
-      badge = 'Follicular (Rising Energy)';
-      color = '#6A994E';
-    }
-
-    // Create highly tailored forecast and tips
     if (phase === 'Menstruation') {
-      forecast = `Bleeding is active (${bleeding} flow). `;
-      if (physical === 'cramps') {
-        forecast += `She is feeling physical cramps. Undergoing uterine contractions and shedding the uterine lining. `;
-      } else {
-        forecast += `Her body is active in shedding the lining, feeling general pelvic weight. `;
-      }
-      if (energy === 'low') {
-        forecast += `Energy is low, body is working hard.`;
-      } else {
-        forecast += `Energy is feeling relatively ${energy}.`;
-      }
-
-      tips = `1. Prepare a warm hot-water bottle or heating pad for her lower abdomen.
-2. Brew her favorite hot tea (chamomile or peppermint is wonderful for cramps).
-3. Bring her favorite chocolates, comfort snacks, or prepare a cozy movie night.
-4. Offer a gentle back rub or lower leg massage to ease discomfort.
-5. Handle house chores proactively. Let her rest without any guilt.`;
+      forecast = `Her period is here${bleeding !== 'none' ? ` (${bleeding} flow)` : ''}. The uterine lining is shedding and hormones sit at their lowest — energy and mood often dip. `;
+      forecast += physical === 'cramps'
+        ? `She's cramping, so her body is working through uterine contractions.`
+        : `Expect some pelvic heaviness and a need for rest.`;
+      tips = `1. Prep a warm hot-water bottle or heating pad for her lower abdomen.
+2. Brew her favourite hot tea (chamomile or peppermint helps cramps).
+3. Bring comfort snacks and set up a cozy movie night.
+4. Offer a gentle back or leg massage.
+5. Quietly take over the chores so she can rest without guilt.`;
+    } else if (phase === 'Follicular') {
+      forecast = `Estrogen is climbing as new follicles develop. This is the bright, rebuilding stretch after her period — energy, mood and motivation are on the way up. `;
+      forecast += energy === 'high' ? `She's already bouncing back strong.` : `Momentum builds a little more each day.`;
+      tips = `1. Plan something fresh — a walk, an outing, or a new little adventure.
+2. Talk through the week's goals and back her plans.
+3. Surprise her with her favourite coffee or tea.
+4. Jump in on any creative project she's excited about.`;
     } else if (phase === 'Ovulation') {
-      forecast = `Cervical fluid is egg-white/fertile, showing peak estrogen and LH surge. Biological fertility is at its highest. `;
-      if (physical === 'energized') {
-        forecast += `Estrogen is boosting physical stamina and skin radiance. `;
-      }
-      if (emotion === 'happy') {
-        forecast += `Feeling emotionally upbeat and highly connected.`;
-      }
-
-      tips = `1. Plan a cute romantic date night. Excellent time for going out, dinner, or social events.
-2. Compliment her aesthetics and express your love. Confidence is highly resonant right now.
-3. Take photos together; capture this vibrant phase.
-4. Schedule some quality couple communication time to dream and connect deeply.`;
+      forecast = `Estrogen peaks and LH surges — this is the fertile window, when she's most likely to conceive. Confidence, libido and sociability are typically at their highest. `;
+      forecast += fluid === 'eggwhite' ? `Egg-white cervical fluid confirms peak fertility.` : `Fertility is at its highest for the cycle.`;
+      tips = `1. Plan a proper date night — dinner, going out, something social.
+2. Compliment her and be affectionate; it lands especially well now.
+3. Take some photos together; she'll feel radiant.
+4. If you're avoiding pregnancy, this is the window to be careful.`;
     } else if (phase === 'Luteal') {
-      forecast = `Progesterone is dominant. Estrogen is dropping. `;
-      if (physical === 'cramps' || physical === 'bloating') {
-        forecast += `Experiencing physical PMS signs: ${physical}. `;
-      }
-      if (emotion === 'irritable' || emotion === 'sad' || emotion === 'anxious') {
-        forecast += `Hormones may trigger emotional waves of feeling ${emotion}. `;
-      }
-      if (energy === 'low') {
-        forecast += `Energy is lower, feeling tired or easily stressed.`;
-      }
-
-      tips = `1. Give her extra grace and absolute patience. Avoid debating or logical problem-solving.
-2. Create a quiet, cozy sanctuary at home. Soft lighting, calm vibe.
-3. Listen intently, hold her hand, and reassure her of your presence. "I am here, you are safe."
-4. Fetch her comfort desserts or small sweet gestures without being asked.
-5. Proactively keep things tidy to minimize sensory overload.`;
+      forecast = `Progesterone is dominant and estrogen is falling toward her next period. PMS symptoms — cramps, bloating, tender breasts, mood swings — can show up in the back half. `;
+      const moods = [emotion === 'irritable' && 'irritable', emotion === 'sad' && 'low', emotion === 'anxious' && 'anxious'].filter(Boolean);
+      if (moods.length) forecast += `She may feel ${moods.join('/')} — hormones, not you.`;
+      else forecast += `Extra softness goes a long way this week.`;
+      tips = `1. Lead with patience and grace — skip debates and problem-solving.
+2. Make home calm: soft lighting, low noise, cozy blankets.
+3. Listen and reassure — "I'm here, you're safe."
+4. Fetch comfort treats before she has to ask.
+5. Keep things tidy to reduce sensory overload.`;
     } else {
-      // Follicular
-      forecast = `Estrogen is gradually rising, prepping new follicles. Standard recovery phase. `;
-      if (energy === 'high') {
-        forecast += `Energy is bouncing back strong! Estrogen is active.`;
-      } else {
-        forecast += `Estrogen levels are supporting a gradual rebound of physical and emotional balance.`;
-      }
-
-      tips = `1. Plan a light outdoor activity, walk in the park, or try something fresh.
-2. Talk about your weekly goals and support each other.
-3. Surprise her with her favorite coffee/tea to start the day.
-4. Help her with any creative or active project she's excited to start.`;
+      forecast = `Log a start date and a few symptoms so NOVIA can map her phase and forecast the days ahead.`;
+      tips = `Plan a cozy check-in, ask how her day's going, and send a sweet message.`;
     }
 
-    return { phase, badge, color, forecast, tips };
+    return { phase, badge, color, forecast, tips, fertileNow, symptomNote };
   };
 
   // Hold the first paint until the typefaces are in memory, otherwise the whole
@@ -1947,6 +2107,105 @@ export default function App() {
                     </View>
                     </FadeInUp>
 
+                    {/* On this day — milestones landing today, then upcoming ones. */}
+                    {(todayMilestones.length > 0 || upcomingMilestones.length > 0) && (
+                      <FadeInUp index={1}>
+                      <View style={styles.sectionCard}>
+                        <View style={styles.rowBetween}>
+                          <Text style={styles.sectionHeading}>ON THIS DAY</Text>
+                          <CalendarHeart size={16} color="#A7C957" />
+                        </View>
+                        {todayMilestones.map((m) => {
+                          const { count, unit } = elapsedAt(m, new Date());
+                          const elapsed = formatElapsed(count, unit);
+                          return (
+                            <View key={m.id} style={styles.onThisDayRow}>
+                              <Text style={styles.onThisDayEmoji}>{m.emoji || '💛'}</Text>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.onThisDayTitle}>
+                                  {m.title}{elapsed ? ` · ${elapsed}` : ''}
+                                </Text>
+                                <Text style={styles.onThisDayToday}>Today 🎉</Text>
+                              </View>
+                            </View>
+                          );
+                        })}
+                        {upcomingMilestones.slice(0, 3).map(({ m, days }) => (
+                          <View key={m.id} style={styles.onThisDayRow}>
+                            <Text style={styles.onThisDayEmoji}>{m.emoji || '💛'}</Text>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.onThisDayTitle}>{m.title}</Text>
+                              <Text style={styles.onThisDaySub}>
+                                {days === 1 ? 'Tomorrow' : `In ${days} days`}
+                              </Text>
+                            </View>
+                          </View>
+                        ))}
+                        <TouchableOpacity onPress={() => setActiveTab('milestones')} style={styles.onThisDayManage}>
+                          <Text style={styles.onThisDayManageText}>Manage milestones</Text>
+                        </TouchableOpacity>
+                      </View>
+                      </FadeInUp>
+                    )}
+
+                    {/* Daily check-in / gratitude with partner-visible streaks. */}
+                    <FadeInUp index={2}>
+                    <View style={styles.sectionCard}>
+                      <View style={styles.rowBetween}>
+                        <Text style={styles.sectionHeading}>DAILY CHECK-IN</Text>
+                        <View style={styles.streakPill}>
+                          <Flame size={13} color="#D8B863" />
+                          <Text style={styles.streakPillText}>{myStreak}d</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.checkInPrompt}>How are you feeling today?</Text>
+                      <View style={styles.checkInEmojiRow}>
+                        {CHECK_IN_FEELINGS.map((f) => {
+                          const selected = checkInFeeling === f.emoji;
+                          return (
+                            <TouchableOpacity
+                              key={f.emoji}
+                              style={[styles.checkInEmojiBtn, selected && styles.checkInEmojiBtnActive]}
+                              onPress={() => handleSubmitCheckIn(f.emoji)}
+                              activeOpacity={0.8}
+                            >
+                              <Text style={styles.checkInEmoji}>{f.emoji}</Text>
+                              <Text style={[styles.checkInEmojiLabel, selected && { color: '#A7C957' }]}>{f.label}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+
+                      <TextInput
+                        style={[styles.input, { marginTop: 12 }]}
+                        placeholder="One thing you're grateful for (optional)"
+                        placeholderTextColor="#6F7A68"
+                        value={checkInGratitude}
+                        onChangeText={setCheckInGratitude}
+                      />
+                      <TouchableOpacity style={[styles.primaryButton, { marginTop: 12 }]} onPress={() => handleSubmitCheckIn()}>
+                        <Text style={styles.primaryBtnText}>{myCheckIn ? 'UPDATE CHECK-IN' : 'SAVE CHECK-IN'}</Text>
+                      </TouchableOpacity>
+
+                      <View style={styles.checkInPartnerRow}>
+                        <View style={{ flex: 1, paddingRight: 8 }}>
+                          <Text style={styles.checkInPartnerLabel}>{partnerName || 'Partner'}</Text>
+                          {partnerCheckIn ? (
+                            <Text style={styles.checkInPartnerValue}>
+                              {partnerCheckIn.feeling}{partnerCheckIn.gratitude ? ` · grateful for ${partnerCheckIn.gratitude}` : ' · checked in today'}
+                            </Text>
+                          ) : (
+                            <Text style={styles.checkInPartnerMuted}>Hasn't checked in yet today</Text>
+                          )}
+                        </View>
+                        <View style={styles.streakPill}>
+                          <Flame size={13} color="#D8B863" />
+                          <Text style={styles.streakPillText}>{partnerStreak}d</Text>
+                        </View>
+                      </View>
+                    </View>
+                    </FadeInUp>
+
                     {/* Compact cycle snapshot — tap through to the full tracker. */}
                     {predictions && (
                       <FadeInUp index={1}>
@@ -2025,9 +2284,9 @@ export default function App() {
                         <Text style={{ fontSize: 26 }}>🪣</Text>
                         <Text style={styles.navCardLabel}>Bucket List</Text>
                       </TouchableOpacity>
-                      <TouchableOpacity style={styles.navCard} onPress={() => setActiveTab('location')} activeOpacity={0.85}>
-                        <MapPin size={26} color="#A7C957" strokeWidth={2} />
-                        <Text style={styles.navCardLabel}>Location</Text>
+                      <TouchableOpacity style={styles.navCard} onPress={() => setActiveTab('milestones')} activeOpacity={0.85}>
+                        <CalendarHeart size={26} color="#A7C957" strokeWidth={2} />
+                        <Text style={styles.navCardLabel}>Milestones</Text>
                       </TouchableOpacity>
                     </View>
                     </FadeInUp>
@@ -2070,145 +2329,6 @@ export default function App() {
                       </View>
                     </View>
                     </FadeInUp>
-
-                    {/* Offline First-Aid Recommendations */}
-                    <FadeInUp index={5}>
-                    <View style={styles.sectionCard}>
-                      <Text style={styles.sectionHeading}>MEDICAL RECOMMENDATIONS &amp; MEDICATION NOTES</Text>
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Search symptoms (e.g. low blood pressure, dizzy, burn)..."
-                        placeholderTextColor="#6F7A68"
-                        value={firstAidSearch}
-                        onChangeText={handleFirstAidSearch}
-                      />
-                      {matchingFirstAid ? (
-                        <View style={styles.firstAidResponse}>
-                          <Text style={styles.firstAidTitle}>{matchingFirstAid.title}</Text>
-                          <Text style={styles.firstAidSub}>First-Aid Instructions:</Text>
-                          {matchingFirstAid.steps.map((s: string, idx: number) => (
-                            <Text key={idx} style={styles.firstAidStep}>{idx + 1}. {s}</Text>
-                          ))}
-                          <Text style={styles.firstAidSub}>Medication Notes:</Text>
-                          {matchingFirstAid.medications.map((m: string, idx: number) => (
-                            <Text key={idx} style={styles.firstAidStep}>{idx + 1}. {m}</Text>
-                          ))}
-                          <Text style={styles.firstAidSub}>Contraindications &amp; Warnings:</Text>
-                          {matchingFirstAid.warnings.map((w: string, idx: number) => (
-                            <Text key={idx} style={[styles.firstAidStep, { color: THEME.colors.danger }]}>• {w}</Text>
-                          ))}
-                        </View>
-                      ) : firstAidSearch ? (
-                        <Text style={styles.noMatchText}>No direct match found. Try typing 'blood pressure' or 'sugar'.</Text>
-                      ) : null}
-                    </View>
-                    </FadeInUp>
-                  </View>
-                )}
-
-                {/* Location Sharing Tab */}
-                {activeTab === 'location' && (
-                  <View style={styles.tabContent}>
-                    <TouchableOpacity style={styles.backRow} onPress={() => setActiveTab('hub')}>
-                      <ChevronLeft size={20} color="#A7C957" />
-                      <Text style={styles.backRowText}>Hub</Text>
-                    </TouchableOpacity>
-                    {/* Partner's shared location */}
-                    <View style={styles.sectionCard}>
-                      <Text style={styles.sectionHeading}>
-                        {(partnerProfile?.display_name || partnerName || 'PARTNER').toUpperCase()}'S LOCATION
-                      </Text>
-                      {partnerLocation ? (
-                        <>
-                          <Text style={styles.locationPlace}>
-                            {partnerLocation.place_label || 'Location shared'}
-                          </Text>
-                          <Text style={styles.locationCoords}>
-                            {partnerLocation.latitude.toFixed(5)}, {partnerLocation.longitude.toFixed(5)}
-                          </Text>
-                          <Text style={styles.locationMeta}>
-                            Updated {formatUpdatedAgo(partnerLocation.updated_at)}
-                            {partnerLocation.accuracy ? ` · ±${Math.round(partnerLocation.accuracy)} m` : ''}
-                          </Text>
-                          {myLocation ? (
-                            <Text style={styles.locationDistance}>
-                              {formatDistance(haversineMeters(myLocation, partnerLocation))} away
-                            </Text>
-                          ) : null}
-                          <TouchableOpacity
-                            style={styles.primaryButton}
-                            onPress={() =>
-                              Linking.openURL(
-                                mapsUrl(
-                                  partnerLocation.latitude,
-                                  partnerLocation.longitude,
-                                  partnerLocation.place_label
-                                )
-                              )
-                            }
-                          >
-                            <Text style={styles.primaryBtnText}>Open in Maps</Text>
-                          </TouchableOpacity>
-                        </>
-                      ) : (
-                        <Text style={styles.welcomeCopy}>
-                          {(partnerProfile?.display_name || partnerName || 'Your partner')} isn't sharing their
-                          location right now. Ask them to open the Location tab and tap “Share my location”.
-                        </Text>
-                      )}
-                    </View>
-
-                    {/* My sharing controls */}
-                    <View style={styles.sectionCard}>
-                      <Text style={styles.sectionHeading}>MY LOCATION</Text>
-                      {myLocation ? (
-                        <Text style={styles.locationMeta}>
-                          Shared {formatUpdatedAgo(myLocation.updated_at)}
-                          {isLiveSharing ? ' · live' : ''}
-                        </Text>
-                      ) : (
-                        <Text style={styles.welcomeCopy}>
-                          You're not sharing your location. Your partner can only see it after you choose to share.
-                        </Text>
-                      )}
-
-                      {locationError ? (
-                        <Text style={styles.locationErrorText}>{locationError}</Text>
-                      ) : null}
-
-                      <TouchableOpacity
-                        style={[styles.primaryButton, locationBusy && { opacity: 0.6 }]}
-                        onPress={shareMyLocation}
-                        disabled={locationBusy}
-                      >
-                        {locationBusy ? (
-                          <ActivityIndicator color="#F2E8CF" />
-                        ) : (
-                          <Text style={styles.primaryBtnText}>
-                            {myLocation ? 'Update my location' : 'Share my location'}
-                          </Text>
-                        )}
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={styles.locationSecondaryBtn}
-                        onPress={() => setLiveSharing(!isLiveSharing)}
-                      >
-                        <Text style={styles.locationSecondaryBtnText}>
-                          {isLiveSharing ? 'Stop live sharing' : 'Share live while app is open'}
-                        </Text>
-                      </TouchableOpacity>
-
-                      {myLocation ? (
-                        <TouchableOpacity style={styles.locationStopBtn} onPress={stopLocationSharing}>
-                          <Text style={styles.locationStopBtnText}>Stop sharing &amp; remove my location</Text>
-                        </TouchableOpacity>
-                      ) : null}
-
-                      <Text style={styles.locationHint}>
-                        NOVIA never tracks you in the background — your location updates only while this screen is open.
-                      </Text>
-                    </View>
                   </View>
                 )}
 
@@ -2246,6 +2366,25 @@ export default function App() {
                               </TouchableOpacity>
                             </View>
                             <Text style={styles.noteBody}>{note.content}</Text>
+
+                            {/* Lightweight emoji reactions — tap to add/remove yours. */}
+                            <View style={styles.reactionBar}>
+                              {NOTE_REACTIONS.map((emoji) => {
+                                const count = Object.values(note.reactions || {}).filter((e) => e === emoji).length;
+                                const mine = !!userId && note.reactions?.[userId] === emoji;
+                                return (
+                                  <TouchableOpacity
+                                    key={emoji}
+                                    style={[styles.reactionChip, count > 0 && styles.reactionChipActive, mine && styles.reactionChipMine]}
+                                    onPress={() => toggleReaction(note, emoji)}
+                                    activeOpacity={0.7}
+                                  >
+                                    <Text style={styles.reactionEmoji}>{emoji}</Text>
+                                    {count > 0 && <Text style={styles.reactionCount}>{count}</Text>}
+                                  </TouchableOpacity>
+                                );
+                              })}
+                            </View>
                           </View>
                         ))
                       )}
@@ -2365,6 +2504,106 @@ export default function App() {
                                 {t.notes ? <Text style={{ color: '#9B9A87', fontSize: 12, marginTop: 2, fontFamily: FONTS.body }}>{t.notes}</Text> : null}
                               </View>
                               <TouchableOpacity style={styles.reminderDeleteButton} onPress={() => deleteTodo(t.id)}>
+                                <X size={13} color="#A7C957" strokeWidth={2.5} />
+                              </TouchableOpacity>
+                            </View>
+                          );
+                        })
+                      )}
+                    </View>
+                    <View style={{ height: 100 }} />
+                  </View>
+                )}
+
+                {/* Milestones / Anniversaries (Hub sub-screen) */}
+                {activeTab === 'milestones' && (
+                  <View style={styles.tabContent}>
+                    <TouchableOpacity style={styles.backRow} onPress={() => setActiveTab('hub')}>
+                      <ChevronLeft size={20} color="#A7C957" />
+                      <Text style={styles.backRowText}>Hub</Text>
+                    </TouchableOpacity>
+
+                    <View style={styles.sectionCard}>
+                      <Text style={styles.sectionHeading}>NEW MILESTONE</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="e.g. First Date, Anniversary"
+                        placeholderTextColor="#6F7A68"
+                        value={newMilestoneTitle}
+                        onChangeText={setNewMilestoneTitle}
+                      />
+
+                      <View style={[styles.rowBetween, { marginTop: 12, marginBottom: 10 }]}>
+                        <Text style={styles.inputLabel}>DATE</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          {milestoneDate ? (
+                            <TouchableOpacity onPress={() => setMilestoneDate('')} style={{ marginRight: 10 }}>
+                              <Text style={{ color: '#A7C957', fontSize: 12, fontFamily: FONTS.bold }}>Clear</Text>
+                            </TouchableOpacity>
+                          ) : null}
+                          <TouchableOpacity style={styles.reminderDateButton} onPress={() => openCalendarFor('milestoneDate')}>
+                            <Text style={styles.reminderDateButtonText}>{milestoneDate || 'Pick a date'}</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+
+                      <Text style={[styles.inputLabel, { marginBottom: 8 }]}>REPEAT</Text>
+                      <View style={styles.chipsRow}>
+                        {(['yearly', 'monthly', 'once'] as MilestoneRecurrence[]).map((r) => (
+                          <TouchableOpacity
+                            key={r}
+                            style={[styles.quickAddChip, milestoneRecurrence === r && { backgroundColor: THEME.glass.accentStrong, ...THEME.shadow.glowAccent }]}
+                            onPress={() => setMilestoneRecurrence(r)}
+                          >
+                            <Text style={styles.quickAddChipText}>
+                              {r === 'yearly' ? 'Every year' : r === 'monthly' ? 'Every month' : 'One-off'}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      <Text style={[styles.inputLabel, { marginTop: 14, marginBottom: 8 }]}>ICON</Text>
+                      <View style={styles.chipsRow}>
+                        {MILESTONE_EMOJIS.map((e) => (
+                          <TouchableOpacity
+                            key={e}
+                            style={[styles.milestoneEmojiChip, milestoneEmoji === e && { backgroundColor: THEME.glass.accentStrong, ...THEME.shadow.glowAccent }]}
+                            onPress={() => setMilestoneEmoji(e)}
+                          >
+                            <Text style={{ fontSize: 20 }}>{e}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      <TouchableOpacity style={[styles.primaryButton, { marginTop: 16 }]} onPress={handleAddMilestone}>
+                        <Text style={styles.primaryBtnText}>ADD MILESTONE</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.sectionCard}>
+                      <Text style={styles.sectionHeading}>SHARED MILESTONES</Text>
+                      {milestones.length === 0 ? (
+                        <Text style={styles.noRemindersText}>No milestones yet. Add your first date or anniversary — you'll both get an "On this day" reminder.</Text>
+                      ) : (
+                        milestones.map((m) => {
+                          const base = parseLocalDate(m.milestone_date);
+                          const days = daysUntilNext(m, new Date());
+                          const recLabel = m.recurrence === 'yearly' ? 'Every year' : m.recurrence === 'monthly' ? 'Every month' : 'One-off';
+                          const whenLabel =
+                            days === null ? 'Passed' :
+                            days === 0 ? 'Today 🎉' :
+                            days === 1 ? 'Tomorrow' :
+                            `In ${days} days`;
+                          return (
+                            <View key={m.id} style={styles.reminderItemRow}>
+                              <Text style={styles.milestoneRowEmoji}>{m.emoji || '💛'}</Text>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.reminderTitle}>{m.title}</Text>
+                                <Text style={{ color: '#A7C957', fontSize: 11, fontFamily: FONTS.bold, marginTop: 2 }}>
+                                  {base.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })} · {recLabel} · {whenLabel}
+                                </Text>
+                              </View>
+                              <TouchableOpacity style={styles.reminderDeleteButton} onPress={() => deleteMilestone(m.id)}>
                                 <X size={13} color="#A7C957" strokeWidth={2.5} />
                               </TouchableOpacity>
                             </View>
@@ -2843,180 +3082,69 @@ export default function App() {
                 {/* Periods & Health Tab */}
                 {activeTab === 'health' && (
                   <View style={styles.tabContent}>
-                    <View style={styles.sectionCard}>
-                      <Text style={styles.sectionHeading}>MENSTRUAL REMINDER &amp; PREDICTION</Text>
-                      {(!records || records.length === 0 || isEditingCycle) ? (
-                        <>
-                          <Text style={styles.inputLabel}>CHOOSE CYCLE START DATE</Text>
-                          <TouchableOpacity 
-                            style={styles.calendarPickerBtn} 
-                            onPress={() => openCalendarFor('periodStartDate')}
-                          >
-                            <Text style={styles.calendarPickerBtnText}>
-                              {periodStartDate ? `START: ${periodStartDate}` : 'CHOOSE START DATE'}
-                            </Text>
-                          </TouchableOpacity>
-
-                          <Text style={styles.inputLabel}>CHOOSE CYCLE END DATE (OPTIONAL)</Text>
-                          <TouchableOpacity 
-                            style={styles.calendarPickerBtn} 
-                            onPress={() => openCalendarFor('periodEndDate')}
-                          >
-                            <Text style={styles.calendarPickerBtnText}>
-                              {periodEndDate ? `END: ${periodEndDate}` : 'CHOOSE END DATE (OPTIONAL)'}
-                            </Text>
-                          </TouchableOpacity>
-
-                          <Text style={styles.inputLabel}>GIRLFRIEND SYMPTOMS QUESTIONNAIRE</Text>
-                          <View style={styles.questionnaireCard}>
-                            {/* Question 1: Bleeding Flow */}
-                            <Text style={styles.questionTitle}>1. Bleeding / Flow</Text>
-                            <View style={styles.optionsRow}>
-                              {(['none', 'spotting', 'light', 'heavy'] as const).map((opt) => (
-                                <TouchableOpacity
-                                  key={opt}
-                                  style={[styles.optionChip, gfBleeding === opt && styles.optionChipSelected]}
-                                  onPress={() => setGfBleeding(opt)}
-                                >
-                                  <Text style={[styles.optionText, gfBleeding === opt && styles.optionTextSelected]}>
-                                    {opt.toUpperCase()}
-                                  </Text>
-                                </TouchableOpacity>
-                              ))}
-                            </View>
-
-                            {/* Question 2: Physical Sensations */}
-                            <Text style={styles.questionTitle}>2. Physical Sensations</Text>
-                            <View style={styles.optionsRow}>
-                              {(['none', 'cramps', 'tender', 'bloating', 'energized'] as const).map((opt) => (
-                                <TouchableOpacity
-                                  key={opt}
-                                  style={[styles.optionChip, gfPhysical === opt && styles.optionChipSelected]}
-                                  onPress={() => setGfPhysical(opt)}
-                                >
-                                  <Text style={[styles.optionText, gfPhysical === opt && styles.optionTextSelected]}>
-                                    {opt === 'tender' ? 'TENDER BREASTS' : opt.toUpperCase()}
-                                  </Text>
-                                </TouchableOpacity>
-                              ))}
-                            </View>
-
-                            {/* Question 3: Cervical Fluid */}
-                            <Text style={styles.questionTitle}>3. Cervical Fluid Type</Text>
-                            <View style={styles.optionsRow}>
-                              {(['none', 'dry', 'sticky', 'creamy', 'eggwhite'] as const).map((opt) => (
-                                <TouchableOpacity
-                                  key={opt}
-                                  style={[styles.optionChip, gfFluid === opt && styles.optionChipSelected]}
-                                  onPress={() => setGfFluid(opt)}
-                                >
-                                  <Text style={[styles.optionText, gfFluid === opt && styles.optionTextSelected]}>
-                                    {opt === 'eggwhite' ? 'EGG-WHITE (FERTILE)' : opt.toUpperCase()}
-                                  </Text>
-                                </TouchableOpacity>
-                              ))}
-                            </View>
-
-                            {/* Question 4: Emotional Vibe */}
-                            <Text style={styles.questionTitle}>4. Emotional Vibe</Text>
-                            <View style={styles.optionsRow}>
-                              {(['calm', 'irritable', 'sad', 'anxious', 'happy'] as const).map((opt) => (
-                                <TouchableOpacity
-                                  key={opt}
-                                  style={[styles.optionChip, gfEmotion === opt && styles.optionChipSelected]}
-                                  onPress={() => setGfEmotion(opt)}
-                                >
-                                  <Text style={[styles.optionText, gfEmotion === opt && styles.optionTextSelected]}>
-                                    {opt === 'calm' ? 'CALM/BALANCED' : opt.toUpperCase()}
-                                  </Text>
-                                </TouchableOpacity>
-                              ))}
-                            </View>
-
-                            {/* Question 5: Energy & Sleep */}
-                            <Text style={styles.questionTitle}>5. Energy &amp; Sleep</Text>
-                            <View style={styles.optionsRow}>
-                              {(['low', 'normal', 'stressed', 'high'] as const).map((opt) => (
-                                <TouchableOpacity
-                                  key={opt}
-                                  style={[styles.optionChip, gfEnergy === opt && styles.optionChipSelected]}
-                                  onPress={() => setGfEnergy(opt)}
-                                >
-                                  <Text style={[styles.optionText, gfEnergy === opt && styles.optionTextSelected]}>
-                                    {opt === 'low' ? 'LOW ENERGY' : opt === 'stressed' ? 'STRESSED/RESTLESS' : opt.toUpperCase()}
-                                  </Text>
-                                </TouchableOpacity>
-                              ))}
-                            </View>
+                    {/* Compact cycle summary — the full detailed prediction and the
+                        editor now live in the Cycle Tracker modal (also reachable
+                        from the side drawer). */}
+                    {(() => {
+                      const latestRecord = records && records.length > 0 ? records[0] : null;
+                      const phaseData = predictions ? getCyclePhaseAndTips(latestRecord, predictions) : null;
+                      const openTracker = (edit: boolean) => { setIsEditingCycle(edit); setIsCycleModalVisible(true); };
+                      return (
+                        <TouchableOpacity style={styles.sectionCard} activeOpacity={0.9} onPress={() => openTracker(!predictions)}>
+                          <View style={styles.rowBetween}>
+                            <Text style={styles.sectionHeading}>MENSTRUAL CYCLE</Text>
+                            {predictions && phaseData ? (
+                              <View style={[styles.cyclePhasePill, { backgroundColor: phaseData.color + '26' }]}>
+                                <Text style={[styles.cyclePhasePillText, { color: phaseData.color }]}>{phaseData.phase}</Text>
+                              </View>
+                            ) : null}
                           </View>
 
-                          <TouchableOpacity style={styles.primaryButton} onPress={handleAddPeriodLog}>
-                            <Text style={styles.primaryBtnText}>Save Cycle Data</Text>
-                          </TouchableOpacity>
-
-                          {records && records.length > 0 && (
-                            <TouchableOpacity 
-                              style={[styles.calendarPickerBtn, { marginTop: 8, backgroundColor: 'rgba(242, 232, 207,0.06)' }]} 
-                              onPress={() => setIsEditingCycle(false)}
-                            >
-                              <Text style={styles.calendarPickerBtnText}>Cancel Editing</Text>
-                            </TouchableOpacity>
+                          {predictions && phaseData ? (
+                            <>
+                              <Text style={[styles.cycleSummaryBadge, { color: phaseData.color }]}>{phaseData.badge}</Text>
+                              <View style={styles.cycleMiniRow}>
+                                <View style={styles.cycleMiniStat}>
+                                  <Text style={styles.cycleMiniValue}>{predictions.cycleDay}</Text>
+                                  <Text style={styles.cycleMiniLabel}>Cycle day</Text>
+                                </View>
+                                <View style={styles.cycleMiniDivider} />
+                                <View style={styles.cycleMiniStat}>
+                                  <Text style={styles.cycleMiniValue}>{Math.max(predictions.daysUntilNextPeriod, 0)}</Text>
+                                  <Text style={styles.cycleMiniLabel}>{predictions.daysUntilNextPeriod === 1 ? 'Day to next' : 'Days to next'}</Text>
+                                </View>
+                                <View style={styles.cycleMiniDivider} />
+                                <View style={styles.cycleMiniStat}>
+                                  <Text style={styles.cycleMiniValue}>{predictions.avgCycleLength}</Text>
+                                  <Text style={styles.cycleMiniLabel}>Avg length</Text>
+                                </View>
+                              </View>
+                              <AnimatedBar
+                                progress={predictions.cycleDay / predictions.avgCycleLength}
+                                color={phaseData.color}
+                                trackStyle={styles.cycleTrack}
+                              />
+                              {phaseData.fertileNow && (
+                                <View style={styles.fertileChip}>
+                                  <Sparkles size={12} color="#0E1A11" strokeWidth={2.4} />
+                                  <Text style={styles.fertileChipText}>Fertile window open</Text>
+                                </View>
+                              )}
+                              <Text style={styles.cycleTapHint}>Tap for the full prediction &amp; to log symptoms →</Text>
+                            </>
+                          ) : (
+                            <>
+                              <Text style={[styles.welcomeCopy, { marginTop: 4 }]}>
+                                Set up cycle tracking to get phase predictions, fertile-window dates, and a gentle reminder before her next period.
+                              </Text>
+                              <View style={[styles.primaryButton, { marginTop: 12 }]}>
+                                <Text style={styles.primaryBtnText}>Set up cycle tracking</Text>
+                              </View>
+                            </>
                           )}
-                        </>
-                      ) : (
-                        (() => {
-                          const latestRecord = records && records.length > 0 ? records[0] : null;
-                          const phaseData = getCyclePhaseAndTips(latestRecord, predictions);
-                          
-                          return (
-                            <View>
-                              <View style={[styles.periodResultCard, { backgroundColor: phaseData.color + '22' }]}>
-                                <Text style={[styles.predText, { color: phaseData.color, fontFamily: FONTS.bold, fontSize: 14, marginBottom: 8 }]}>
-                                  Current Status: {phaseData.badge}
-                                </Text>
-                                {predictions && (
-                                  <>
-                                    <Text style={styles.predText}>Cycle Day: {predictions.cycleDay} of ~{predictions.avgCycleLength}</Text>
-                                    <Text style={styles.predText}>Next Predicted Period: {predictions.nextPeriodStart.toLocaleDateString()} ({predictions.daysUntilNextPeriod} days)</Text>
-                                    <Text style={styles.predText}>Predicted Ovulation Day: {predictions.predictedOvulation.toLocaleDateString()}</Text>
-                                    <Text style={styles.predText}>Fertile Window: {predictions.fertileWindowStart.toLocaleDateString()} – {predictions.fertileWindowEnd.toLocaleDateString()}</Text>
-                                    {predictions.isStale ? (
-                                      <Text style={[styles.predText, { color: THEME.colors.warning, marginTop: 6 }]}>
-                                        Estimated only — the last logged period is {predictions.cyclesSkipped} cycles old. Log a period to re-anchor these dates.
-                                      </Text>
-                                    ) : predictions.confidence === 'low' ? (
-                                      <Text style={[styles.predText, { color: THEME.colors.textMuted, marginTop: 6 }]}>
-                                        Based on a default 28-day cycle — log a couple more periods to personalise this.
-                                      </Text>
-                                    ) : null}
-                                  </>
-                                )}
-                                <Text style={[styles.predText, { opacity: 0.8, fontSize: 12 }]}>Reminder: Both partners get a notification 1 day before.</Text>
-                              </View>
-
-                              <View style={styles.adviceCard}>
-                                <Text style={styles.adviceHeading}>BIOLOGICAL FORECAST</Text>
-                                <Text style={[styles.adviceBody, { marginBottom: 12 }]}>
-                                  {phaseData.forecast}
-                                </Text>
-                                
-                                <Text style={styles.adviceHeading}>COZY RELATIONSHIP TIPS FOR BOYFRIEND</Text>
-                                <Text style={styles.adviceBody}>
-                                  {phaseData.tips}
-                                </Text>
-                              </View>
-
-                              <TouchableOpacity 
-                                style={[styles.primaryButton, { marginTop: 16 }]} 
-                                onPress={() => setIsEditingCycle(true)}
-                              >
-                                <Text style={styles.primaryBtnText}>Edit Details / Log Symptoms</Text>
-                              </TouchableOpacity>
-                            </View>
-                          );
-                        })()
-                      )}
-                    </View>
+                        </TouchableOpacity>
+                      );
+                    })()}
 
                     <View style={styles.sectionCard}>
                       <Text style={styles.sectionHeading}>HOSPITAL VISIT LOG</Text>
@@ -3242,18 +3370,43 @@ export default function App() {
                   )}
                 </View>
 
-                <TouchableOpacity 
-                  style={styles.drawerMenuItem} 
+                <TouchableOpacity
+                  style={styles.drawerMenuItem}
+                  onPress={() => {
+                    toggleDrawer(false);
+                    setIsEditingCycle(false);
+                    setIsCycleModalVisible(true);
+                  }}
+                >
+                  <Activity color="#A7C957" size={20} style={{ marginRight: 12 }} />
+                  <Text style={styles.drawerMenuText}>Cycle Tracker</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.drawerMenuItem}
+                  onPress={() => {
+                    toggleDrawer(false);
+                    setIsChangelogVisible(true);
+                    markUpdatesViewed();
+                  }}
+                >
+                  <ScrollText color="#A7C957" size={20} style={{ marginRight: 12 }} />
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={styles.drawerMenuText}>Changelog</Text>
+                    {hasUnseenUpdate && <View style={styles.unseenDot} />}
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.drawerMenuItem}
                   onPress={() => {
                     toggleDrawer(false);
                     setIsSettingsVisible(true);
-                    markUpdatesViewed();
                   }}
                 >
                   <SettingsIcon color="#A7C957" size={20} style={{ marginRight: 12 }} />
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     <Text style={styles.drawerMenuText}>Settings</Text>
-                    {hasUnseenUpdate && <View style={styles.unseenDot} />}
                   </View>
                 </TouchableOpacity>
 
@@ -3335,27 +3488,6 @@ export default function App() {
                     </View>
                   </View>
 
-                  <View style={styles.settingsSection}>
-                    <Text style={styles.settingsSectionTitle}>What's New</Text>
-                    <Text style={styles.settingsHelpText}>
-                      Updates pushed to NOVIA. Your partner sees the same list.
-                    </Text>
-                    {appUpdates.length === 0 ? (
-                      <Text style={styles.settingsHelpText}>No updates published yet.</Text>
-                    ) : (
-                      appUpdates.map((u) => (
-                        <View key={u.id} style={styles.updateEntry}>
-                          <View style={styles.rowBetween}>
-                            <Text style={styles.updateVersion}>v{u.version}</Text>
-                            <Text style={styles.updateDate}>{new Date(u.created_at).toLocaleDateString()}</Text>
-                          </View>
-                          <Text style={styles.updateTitle}>{u.title}</Text>
-                          {u.body ? <Text style={styles.updateBody}>{u.body}</Text> : null}
-                        </View>
-                      ))
-                    )}
-                  </View>
-
                   {coupleId && (
                     <View style={[styles.settingsSection, { marginBottom: 0, paddingBottom: 0 }]}>
                       <Text style={styles.settingsSectionTitle}>Danger Zone</Text>
@@ -3371,6 +3503,258 @@ export default function App() {
                       </TouchableOpacity>
                     </View>
                   )}
+                </ScrollView>
+              </View>
+            </View>
+          </Modal>
+
+          {/* Cycle Tracker Modal — detailed prediction + editor */}
+          <Modal
+            visible={isCycleModalVisible}
+            transparent={true}
+            animationType="slide"
+            onRequestClose={() => setIsCycleModalVisible(false)}
+          >
+            <View style={styles.settingsModalOverlay}>
+              <View style={styles.settingsModalContent}>
+                <View style={styles.settingsHeader}>
+                  <Text style={styles.settingsTitle}>CYCLE TRACKER</Text>
+                  <TouchableOpacity onPress={() => setIsCycleModalVisible(false)}>
+                    <X color="#E3DCC6" size={20} />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView style={styles.settingsBody} keyboardShouldPersistTaps="handled">
+                  {(!records || records.length === 0 || isEditingCycle) ? (
+                    <>
+                      <Text style={styles.inputLabel}>CHOOSE CYCLE START DATE</Text>
+                      <TouchableOpacity style={styles.calendarPickerBtn} onPress={() => openCalendarFor('periodStartDate')}>
+                        <Text style={styles.calendarPickerBtnText}>
+                          {periodStartDate ? `START: ${periodStartDate}` : 'CHOOSE START DATE'}
+                        </Text>
+                      </TouchableOpacity>
+
+                      <Text style={styles.inputLabel}>CHOOSE CYCLE END DATE (OPTIONAL)</Text>
+                      <TouchableOpacity style={styles.calendarPickerBtn} onPress={() => openCalendarFor('periodEndDate')}>
+                        <Text style={styles.calendarPickerBtnText}>
+                          {periodEndDate ? `END: ${periodEndDate}` : 'CHOOSE END DATE (OPTIONAL)'}
+                        </Text>
+                      </TouchableOpacity>
+
+                      <Text style={styles.inputLabel}>GIRLFRIEND SYMPTOMS QUESTIONNAIRE</Text>
+                      <View style={styles.questionnaireCard}>
+                        <Text style={styles.questionTitle}>1. Bleeding / Flow</Text>
+                        <View style={styles.optionsRow}>
+                          {(['none', 'spotting', 'light', 'heavy'] as const).map((opt) => (
+                            <TouchableOpacity key={opt} style={[styles.optionChip, gfBleeding === opt && styles.optionChipSelected]} onPress={() => setGfBleeding(opt)}>
+                              <Text style={[styles.optionText, gfBleeding === opt && styles.optionTextSelected]}>{opt.toUpperCase()}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+
+                        <Text style={styles.questionTitle}>2. Physical Sensations</Text>
+                        <View style={styles.optionsRow}>
+                          {(['none', 'cramps', 'tender', 'bloating', 'energized'] as const).map((opt) => (
+                            <TouchableOpacity key={opt} style={[styles.optionChip, gfPhysical === opt && styles.optionChipSelected]} onPress={() => setGfPhysical(opt)}>
+                              <Text style={[styles.optionText, gfPhysical === opt && styles.optionTextSelected]}>{opt === 'tender' ? 'TENDER BREASTS' : opt.toUpperCase()}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+
+                        <Text style={styles.questionTitle}>3. Cervical Fluid Type</Text>
+                        <View style={styles.optionsRow}>
+                          {(['none', 'dry', 'sticky', 'creamy', 'eggwhite'] as const).map((opt) => (
+                            <TouchableOpacity key={opt} style={[styles.optionChip, gfFluid === opt && styles.optionChipSelected]} onPress={() => setGfFluid(opt)}>
+                              <Text style={[styles.optionText, gfFluid === opt && styles.optionTextSelected]}>{opt === 'eggwhite' ? 'EGG-WHITE (FERTILE)' : opt.toUpperCase()}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+
+                        <Text style={styles.questionTitle}>4. Emotional Vibe</Text>
+                        <View style={styles.optionsRow}>
+                          {(['calm', 'irritable', 'sad', 'anxious', 'happy'] as const).map((opt) => (
+                            <TouchableOpacity key={opt} style={[styles.optionChip, gfEmotion === opt && styles.optionChipSelected]} onPress={() => setGfEmotion(opt)}>
+                              <Text style={[styles.optionText, gfEmotion === opt && styles.optionTextSelected]}>{opt === 'calm' ? 'CALM/BALANCED' : opt.toUpperCase()}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+
+                        <Text style={styles.questionTitle}>5. Energy &amp; Sleep</Text>
+                        <View style={styles.optionsRow}>
+                          {(['low', 'normal', 'stressed', 'high'] as const).map((opt) => (
+                            <TouchableOpacity key={opt} style={[styles.optionChip, gfEnergy === opt && styles.optionChipSelected]} onPress={() => setGfEnergy(opt)}>
+                              <Text style={[styles.optionText, gfEnergy === opt && styles.optionTextSelected]}>{opt === 'low' ? 'LOW ENERGY' : opt === 'stressed' ? 'STRESSED/RESTLESS' : opt.toUpperCase()}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </View>
+
+                      <TouchableOpacity style={styles.primaryButton} onPress={handleAddPeriodLog}>
+                        <Text style={styles.primaryBtnText}>Save Cycle Data</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.calendarPickerBtn, { marginTop: 8, marginBottom: 20, backgroundColor: 'rgba(242, 232, 207,0.06)' }]}
+                        onPress={() => {
+                          if (records && records.length > 0) setIsEditingCycle(false);
+                          else setIsCycleModalVisible(false);
+                        }}
+                      >
+                        <Text style={styles.calendarPickerBtnText}>{records && records.length > 0 ? 'Cancel Editing' : 'Close'}</Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    (() => {
+                      const latestRecord = records && records.length > 0 ? records[0] : null;
+                      const phaseData = getCyclePhaseAndTips(latestRecord, predictions);
+                      const PHASE_ORDER = ['Menstruation', 'Follicular', 'Ovulation', 'Luteal'];
+                      const activeIdx = PHASE_ORDER.indexOf(phaseData.phase);
+                      const fmt = (d: Date) => d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+                      return (
+                        <View style={{ paddingBottom: 24 }}>
+                          {/* Hero */}
+                          <View style={[styles.cycleHero, { backgroundColor: phaseData.color + '22', borderColor: phaseData.color + '55' }]}>
+                            <Text style={[styles.cycleHeroPhase, { color: phaseData.color }]}>{phaseData.phase}</Text>
+                            <Text style={styles.cycleHeroBadge}>{phaseData.badge}</Text>
+                            {predictions && (
+                              <Text style={styles.cycleHeroDay}>Cycle day {predictions.cycleDay} of ~{predictions.avgCycleLength}</Text>
+                            )}
+                            {phaseData.fertileNow && (
+                              <View style={[styles.fertileChip, { alignSelf: 'flex-start', marginTop: 10 }]}>
+                                <Sparkles size={12} color="#0E1A11" strokeWidth={2.4} />
+                                <Text style={styles.fertileChipText}>Fertile window open</Text>
+                              </View>
+                            )}
+                          </View>
+
+                          {/* Phase stepper */}
+                          <View style={styles.phaseStepper}>
+                            {PHASE_ORDER.map((p, i) => {
+                              const on = i === activeIdx;
+                              const c = (PHASE_COLORS as any)[p] || THEME.colors.primary;
+                              return (
+                                <View key={p} style={styles.phaseStep}>
+                                  <View style={[styles.phaseStepDot, { borderColor: c }, on && { backgroundColor: c }]} />
+                                  <Text style={[styles.phaseStepLabel, on && { color: c, fontFamily: FONTS.bold }]}>{p === 'Menstruation' ? 'Period' : p === 'Follicular' ? 'Follic.' : p === 'Ovulation' ? 'Ovul.' : 'Luteal'}</Text>
+                                </View>
+                              );
+                            })}
+                          </View>
+
+                          {predictions && (
+                            <>
+                              <AnimatedBar
+                                progress={predictions.cycleDay / predictions.avgCycleLength}
+                                color={phaseData.color}
+                                trackStyle={[styles.cycleTrack, { marginTop: 4, marginBottom: 16 }]}
+                              />
+
+                              {/* Key dates */}
+                              <View style={styles.cycleDatesGrid}>
+                                <View style={styles.cycleDateBox}>
+                                  <Text style={styles.cycleDateLabel}>NEXT PERIOD</Text>
+                                  <Text style={styles.cycleDateValue}>{fmt(predictions.nextPeriodStart)}</Text>
+                                  <Text style={styles.cycleDateSub}>
+                                    {predictions.daysUntilNextPeriod > 0
+                                      ? `in ${predictions.daysUntilNextPeriod} day${predictions.daysUntilNextPeriod === 1 ? '' : 's'}`
+                                      : predictions.daysUntilNextPeriod === 0 ? 'today' : 'overdue'}
+                                  </Text>
+                                </View>
+                                <View style={styles.cycleDateBox}>
+                                  <Text style={styles.cycleDateLabel}>OVULATION</Text>
+                                  <Text style={styles.cycleDateValue}>{fmt(predictions.predictedOvulation)}</Text>
+                                  <Text style={styles.cycleDateSub}>peak fertility</Text>
+                                </View>
+                                <View style={styles.cycleDateBox}>
+                                  <Text style={styles.cycleDateLabel}>FERTILE WINDOW</Text>
+                                  <Text style={styles.cycleDateValue}>{fmt(predictions.fertileWindowStart)} – {fmt(predictions.fertileWindowEnd)}</Text>
+                                  <Text style={styles.cycleDateSub}>higher chance to conceive</Text>
+                                </View>
+                                <View style={styles.cycleDateBox}>
+                                  <Text style={styles.cycleDateLabel}>AVERAGES</Text>
+                                  <Text style={styles.cycleDateValue}>{predictions.avgCycleLength}d cycle</Text>
+                                  <Text style={styles.cycleDateSub}>~{predictions.avgPeriodLength}d period</Text>
+                                </View>
+                              </View>
+
+                              {predictions.isStale ? (
+                                <Text style={[styles.predText, { color: THEME.colors.warning, marginTop: 12 }]}>
+                                  Estimated only — the last logged period is {predictions.cyclesSkipped} cycles old. Log her latest period to re-anchor these dates.
+                                </Text>
+                              ) : predictions.confidence === 'low' ? (
+                                <Text style={[styles.predText, { color: THEME.colors.textMuted, marginTop: 12 }]}>
+                                  Based on a default 28-day cycle — log a couple more periods to personalise this.
+                                </Text>
+                              ) : (
+                                <Text style={[styles.predText, { color: THEME.colors.textMuted, marginTop: 12 }]}>
+                                  Confidence: {predictions.confidence} · from her logged history.
+                                </Text>
+                              )}
+                            </>
+                          )}
+
+                          <View style={[styles.adviceCard, { marginTop: 16 }]}>
+                            <Text style={styles.adviceHeading}>WHAT'S HAPPENING</Text>
+                            <Text style={[styles.adviceBody, { marginBottom: 10 }]}>{phaseData.forecast}</Text>
+                            <Text style={[styles.predText, { fontStyle: 'italic', opacity: 0.85 }]}>{phaseData.symptomNote}</Text>
+                          </View>
+
+                          <View style={[styles.adviceCard, { marginTop: 12 }]}>
+                            <Text style={styles.adviceHeading}>COZY TIPS FOR THE BOYFRIEND</Text>
+                            <Text style={styles.adviceBody}>{phaseData.tips}</Text>
+                          </View>
+
+                          <Text style={[styles.predText, { opacity: 0.7, fontSize: 12, marginTop: 12 }]}>
+                            Reminder: you both get a notification the morning before her predicted next period.
+                          </Text>
+
+                          <TouchableOpacity style={[styles.primaryButton, { marginTop: 16, marginBottom: 24 }]} onPress={() => setIsEditingCycle(true)}>
+                            <Text style={styles.primaryBtnText}>Edit details / Log symptoms</Text>
+                          </TouchableOpacity>
+                        </View>
+                      );
+                    })()
+                  )}
+                </ScrollView>
+              </View>
+            </View>
+          </Modal>
+
+          {/* Changelog Modal */}
+          <Modal
+            visible={isChangelogVisible}
+            transparent={true}
+            animationType="slide"
+            onRequestClose={() => setIsChangelogVisible(false)}
+          >
+            <View style={styles.settingsModalOverlay}>
+              <View style={styles.settingsModalContent}>
+                <View style={styles.settingsHeader}>
+                  <Text style={styles.settingsTitle}>CHANGELOG</Text>
+                  <TouchableOpacity onPress={() => setIsChangelogVisible(false)}>
+                    <X color="#E3DCC6" size={20} />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView style={styles.settingsBody} keyboardShouldPersistTaps="handled">
+                  <Text style={[styles.settingsHelpText, { marginBottom: 12 }]}>
+                    Recent updates pushed to NOVIA. You and your partner see the same list.
+                  </Text>
+                  {appUpdates.length === 0 ? (
+                    <Text style={styles.settingsHelpText}>No updates published yet.</Text>
+                  ) : (
+                    appUpdates.map((u) => (
+                      <View key={u.id} style={styles.updateEntry}>
+                        <View style={styles.rowBetween}>
+                          <Text style={styles.updateVersion}>v{u.version}</Text>
+                          <Text style={styles.updateDate}>{new Date(u.created_at).toLocaleDateString()}</Text>
+                        </View>
+                        <Text style={styles.updateTitle}>{u.title}</Text>
+                        {u.body ? <Text style={styles.updateBody}>{u.body}</Text> : null}
+                      </View>
+                    ))
+                  )}
+                  <View style={{ height: 24 }} />
                 </ScrollView>
               </View>
             </View>
@@ -3665,6 +4049,112 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 10,
   },
+  // --- Cycle summary (Health tab) + detailed tracker (modal) ---------------
+  cycleSummaryBadge: {
+    fontFamily: FONTS.bold,
+    fontSize: 13,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  cycleTapHint: {
+    fontFamily: FONTS.body,
+    color: THEME.colors.textMuted,
+    fontSize: 11,
+    marginTop: 12,
+  },
+  fertileChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 5,
+    marginTop: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: THEME.borderRadius.round,
+    backgroundColor: THEME.colors.primary,
+  },
+  fertileChipText: {
+    fontFamily: FONTS.bold,
+    color: '#0E1A11',
+    fontSize: 11,
+    letterSpacing: 0.3,
+  },
+  cycleHero: {
+    borderRadius: THEME.borderRadius.lg,
+    borderWidth: 1,
+    padding: 18,
+    marginBottom: 18,
+  },
+  cycleHeroPhase: {
+    fontFamily: FONTS.display,
+    fontSize: 26,
+    letterSpacing: 0.5,
+  },
+  cycleHeroBadge: {
+    fontFamily: FONTS.semibold,
+    color: THEME.colors.text,
+    fontSize: 13,
+    opacity: 0.85,
+    marginTop: 2,
+  },
+  cycleHeroDay: {
+    fontFamily: FONTS.body,
+    color: THEME.colors.textMuted,
+    fontSize: 13,
+    marginTop: 8,
+  },
+  phaseStepper: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  phaseStep: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 6,
+  },
+  phaseStepDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 2,
+    backgroundColor: 'transparent',
+  },
+  phaseStepLabel: {
+    fontFamily: FONTS.medium,
+    color: THEME.colors.textMuted,
+    fontSize: 11,
+  },
+  cycleDatesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  cycleDateBox: {
+    flexGrow: 1,
+    flexBasis: '46%',
+    backgroundColor: THEME.glass.surface,
+    borderRadius: THEME.borderRadius.md,
+    padding: 12,
+  },
+  cycleDateLabel: {
+    fontFamily: FONTS.bold,
+    color: THEME.colors.textMuted,
+    fontSize: 10,
+    letterSpacing: 0.6,
+  },
+  cycleDateValue: {
+    fontFamily: FONTS.bold,
+    color: THEME.colors.text,
+    fontSize: 15,
+    marginTop: 4,
+  },
+  cycleDateSub: {
+    fontFamily: FONTS.body,
+    color: THEME.colors.textMuted,
+    fontSize: 11,
+    marginTop: 2,
+  },
   moodRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -3788,6 +4278,37 @@ const styles = StyleSheet.create({
     color: THEME.colors.danger,
     fontSize: 10,
     fontFamily: FONTS.heavy,
+  },
+  reactionBar: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 5,
+    marginTop: 'auto',
+    paddingTop: 10,
+  },
+  reactionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: THEME.borderRadius.round,
+    backgroundColor: THEME.glass.inset,
+  },
+  reactionChipActive: {
+    backgroundColor: THEME.glass.accent,
+  },
+  reactionChipMine: {
+    backgroundColor: THEME.glass.accentStrong,
+    ...THEME.shadow.glowAccent,
+  },
+  reactionEmoji: {
+    fontSize: 13,
+  },
+  reactionCount: {
+    fontFamily: FONTS.bold,
+    color: THEME.colors.primary,
+    fontSize: 10,
   },
   sectionTitle: {
     fontSize: 26,
@@ -5040,6 +5561,134 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.bold,
     marginTop: 8,
     letterSpacing: 0.3,
+  },
+
+  // ---- Daily check-in ----
+  streakPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: THEME.borderRadius.round,
+    backgroundColor: 'rgba(216, 184, 99, 0.16)',
+  },
+  streakPillText: {
+    color: '#D8B863',
+    fontSize: 12,
+    fontFamily: FONTS.bold,
+    letterSpacing: 0.3,
+  },
+  checkInPrompt: {
+    color: '#E3DCC6',
+    fontSize: 14,
+    fontFamily: FONTS.medium,
+    marginTop: 10,
+    marginBottom: 12,
+  },
+  checkInEmojiRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  checkInEmojiBtn: {
+    flex: 1,
+    marginHorizontal: 3,
+    paddingVertical: 10,
+    borderRadius: THEME.borderRadius.sm,
+    backgroundColor: THEME.glass.inset,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkInEmojiBtnActive: {
+    backgroundColor: THEME.glass.accentStrong,
+    ...THEME.shadow.glowAccent,
+  },
+  checkInEmoji: {
+    fontSize: 22,
+  },
+  checkInEmojiLabel: {
+    color: '#9B9A87',
+    fontSize: 10,
+    fontFamily: FONTS.semibold,
+    marginTop: 4,
+    letterSpacing: 0.2,
+  },
+  checkInPartnerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 16,
+    paddingTop: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: THEME.colors.border,
+  },
+  checkInPartnerLabel: {
+    color: '#F2E8CF',
+    fontSize: 13,
+    fontFamily: FONTS.bold,
+  },
+  checkInPartnerValue: {
+    color: '#B7C29E',
+    fontSize: 12,
+    fontFamily: FONTS.body,
+    marginTop: 2,
+  },
+  checkInPartnerMuted: {
+    color: '#6F7A68',
+    fontSize: 12,
+    fontFamily: FONTS.body,
+    marginTop: 2,
+  },
+
+  // ---- Milestones / On this day ----
+  onThisDayRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  onThisDayEmoji: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  onThisDayTitle: {
+    color: '#F2E8CF',
+    fontSize: 15,
+    fontFamily: FONTS.semibold,
+  },
+  onThisDayToday: {
+    color: '#A7C957',
+    fontSize: 12,
+    fontFamily: FONTS.bold,
+    marginTop: 2,
+  },
+  onThisDaySub: {
+    color: '#9B9A87',
+    fontSize: 12,
+    fontFamily: FONTS.medium,
+    marginTop: 2,
+  },
+  onThisDayManage: {
+    marginTop: 14,
+    alignSelf: 'flex-start',
+  },
+  onThisDayManageText: {
+    color: '#A7C957',
+    fontSize: 12,
+    fontFamily: FONTS.bold,
+    letterSpacing: 0.3,
+  },
+  milestoneEmojiChip: {
+    width: 44,
+    height: 44,
+    borderRadius: THEME.borderRadius.sm,
+    backgroundColor: THEME.glass.inset,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  milestoneRowEmoji: {
+    fontSize: 22,
+    marginRight: 12,
   },
   vocabWord: {
     color: '#F2E8CF',
