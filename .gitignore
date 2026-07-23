@@ -46,4 +46,6 @@ yarn-error.*
 .idea/
 .vs/
 .claude/
+CLAUDE.md
+AGENTS.md
 *.apk
