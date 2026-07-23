@@ -94,3 +94,6 @@ If native dependencies or plugins are altered, a new native build must be compil
 ```bash
 eas build --platform all --profile production
 ```
+
+
+<3
