@@ -5,7 +5,6 @@ import { SharedNote } from '../types';
 
 export function useRealtimeNotes(coupleId: string | null, userId: string | null) {
   const [notes, setNotes] = useState<SharedNote[]>([]);
-  const [isTyping, setIsTyping] = useState<boolean>(false);
   const [isPartnerTyping, setIsPartnerTyping] = useState<boolean>(false);
   const channelRef = useRef<any>(null);
 
@@ -194,7 +193,6 @@ export function useRealtimeNotes(coupleId: string | null, userId: string | null)
 
   return {
     notes,
-    isTyping,
     isPartnerTyping,
     addNote,
     removeNote,

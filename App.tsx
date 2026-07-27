@@ -15,19 +15,17 @@ import {
   Animated,
   Easing,
   Modal,
-  Linking,
   AppState,
-  Image,
   Dimensions,
   BackHandler
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
-import { Menu, Settings as SettingsIcon, LogOut, X, User, Heart, Check, Square, CheckSquare, Home, FileText, Wallet, Activity, ListChecks, MessageSquareWarning, ChevronLeft, Send, BookOpen, Sparkles, ScrollText, CalendarHeart, Flame } from 'lucide-react-native';
+import { Menu, Settings as SettingsIcon, LogOut, X, Heart, Check, Square, CheckSquare, Home, FileText, Wallet, Activity, ListChecks, MessageSquareWarning, ChevronLeft, Send, BookOpen, Sparkles, ScrollText, CalendarHeart, Flame } from 'lucide-react-native';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, RadialGradient, Rect, Stop, Filter, FeTurbulence, FeColorMatrix, FeComposite } from 'react-native-svg';
 import * as Notifications from 'expo-notifications';
-import { Todo, TodoRecurrence, Complaint, AppUpdate, Milestone, MilestoneRecurrence } from './src/types';
+import { TodoRecurrence, AppUpdate, Milestone, MilestoneRecurrence } from './src/types';
 import { useAuth } from './src/hooks/useAuth';
 import { useRealtimeNotes } from './src/hooks/useRealtimeNotes';
 import { useMood } from './src/hooks/useMood';
@@ -68,8 +66,6 @@ import { Manrope_600SemiBold } from '@expo-google-fonts/manrope/600SemiBold';
 import { Manrope_700Bold } from '@expo-google-fonts/manrope/700Bold';
 import { Manrope_800ExtraBold } from '@expo-google-fonts/manrope/800ExtraBold';
 import { FONTS, PALETTE, THEME } from './src/constants/theme';
-
-const DAY_OPTIONS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
 // Quick emoji reactions available on each shared note.
 const NOTE_REACTIONS = ['❤️', '😂', '👍', '🥺', '🔥'] as const;
@@ -801,11 +797,6 @@ export default function App() {
   const [isChangelogVisible, setIsChangelogVisible] = useState(false);
   const [periodStartDate, setPeriodStartDate] = useState('');
   const [periodEndDate, setPeriodEndDate] = useState('');
-  const [symptoms, setSymptoms] = useState<string[]>([]);
-  const [crampsIntensity, setCrampsIntensity] = useState<'none' | 'mild' | 'moderate' | 'heavy'>('none');
-  const [moodSwings, setMoodSwings] = useState<'balanced' | 'irritable' | 'anxious' | 'sad'>('balanced');
-  const [flowLevel, setFlowLevel] = useState<'light' | 'medium' | 'heavy'>('light');
-  const [ovulationMucus, setOvulationMucus] = useState<'dry' | 'sticky' | 'creamy' | 'fertile'>('dry');
 
   // Tapping a NOVIA notification jumps to the relevant screen.
   useEffect(() => {
@@ -3904,24 +3895,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  header: {
-    paddingVertical: THEME.spacing.sm,
-    alignItems: 'center',
-    backgroundColor: 'transparent',
-  },
-  logo: {
-    fontSize: 22,
-    fontFamily: FONTS.bold,
-    color: THEME.colors.primary,
-    letterSpacing: 3,
-  },
-  headerSubtitle: {
-    fontFamily: FONTS.body,
-    fontSize: 9,
-    color: THEME.colors.textMuted,
-    letterSpacing: 1,
-    marginTop: 2,
-  },
   authContainer: {
     padding: THEME.spacing.md,
     alignItems: 'center',
@@ -3967,13 +3940,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: THEME.spacing.xs,
     paddingVertical: THEME.spacing.md,
     marginBottom: THEME.spacing.sm,
-  },
-  welcomeKicker: {
-    color: '#E0A458',
-    fontSize: 10,
-    fontFamily: FONTS.heavy,
-    letterSpacing: 1.5,
-    marginBottom: THEME.spacing.xs,
   },
   welcomeTitle: {
     color: THEME.colors.text,
@@ -4320,54 +4286,6 @@ const styles = StyleSheet.create({
     fontSize: 19,
     letterSpacing: 1.5,
   },
-  firstAidResponse: {
-    backgroundColor: THEME.glass.success,
-    borderRadius: THEME.borderRadius.sm,
-    padding: THEME.spacing.md,
-    marginTop: THEME.spacing.sm,
-  },
-  firstAidTitle: {
-    color: '#0E9594',
-    fontFamily: FONTS.bold,
-    fontSize: 15,
-    marginBottom: THEME.spacing.xs,
-  },
-  firstAidSub: {
-    color: '#EDEDF4',
-    fontFamily: FONTS.bold,
-    fontSize: 12,
-    marginTop: THEME.spacing.sm,
-    marginBottom: THEME.spacing.xs,
-  },
-  firstAidStep: {
-    fontFamily: FONTS.body,
-    color: '#F24722',
-    fontSize: 12,
-    lineHeight: 18,
-    marginBottom: 4,
-  },
-  noMatchText: {
-    fontFamily: FONTS.body,
-    color: '#3A3F55',
-    fontSize: 11,
-    fontStyle: 'italic',
-    marginTop: THEME.spacing.xs,
-  },
-  canvasCard: {
-    backgroundColor: THEME.glass.surface,
-    padding: THEME.spacing.md,
-    borderRadius: THEME.borderRadius.md,
-    minHeight: 350,
-    ...THEME.shadow.soft,
-  },
-  canvasText: {
-    fontFamily: FONTS.body,
-    flex: 1,
-    color: '#EDEDF4',
-    fontSize: 15,
-    lineHeight: 22,
-    minHeight: 300,
-  },
   noteInput: {
     minHeight: 96,
   },
@@ -4441,59 +4359,6 @@ const styles = StyleSheet.create({
     marginTop: THEME.spacing.md,
     letterSpacing: -0.4,
   },
-  alarmHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: THEME.spacing.md,
-    marginBottom: THEME.spacing.sm,
-  },
-  alarmHeaderSub: {
-    fontFamily: FONTS.body,
-    color: '#8B90A4',
-    fontSize: 14,
-    marginTop: -4,
-    marginBottom: THEME.spacing.xs,
-  },
-  addAlarmButton: {
-    backgroundColor: THEME.glass.accentStrong,
-    borderRadius: THEME.borderRadius.sm,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    minWidth: 74,
-    alignItems: 'center',
-  },
-  addAlarmButtonText: {
-    color: '#0E9594',
-    fontSize: 14,
-    fontFamily: FONTS.heavy,
-  },
-  deleteAlarmButton: {
-    backgroundColor: 'rgba(242, 71, 34, 0.12)',
-    borderRadius: THEME.borderRadius.sm,
-    alignItems: 'center',
-    padding: THEME.spacing.md,
-    marginTop: THEME.spacing.sm,
-  },
-  deleteAlarmButtonText: {
-    color: '#F24722',
-    fontSize: 15,
-    fontFamily: FONTS.heavy,
-  },
-  alarmCreatorCard: {
-    backgroundColor: THEME.glass.surface,
-    borderRadius: THEME.borderRadius.md,
-    padding: THEME.spacing.md,
-    marginBottom: THEME.spacing.md,
-    ...THEME.shadow.lifted,
-  },
-  alarmPreview: {
-    color: '#EDEDF4',
-    fontSize: 48,
-    fontFamily: FONTS.heavy,
-    textAlign: 'center',
-    marginBottom: THEME.spacing.sm,
-  },
   spinnerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -4542,32 +4407,6 @@ const styles = StyleSheet.create({
     fontSize: 32,
     fontFamily: FONTS.heavy,
   },
-  daySelectorRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: THEME.spacing.md,
-  },
-  dayChip: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: THEME.glass.surface,
-    ...THEME.shadow.soft,
-  },
-  activeDayChip: {
-    backgroundColor: '#0E9594',
-    ...THEME.shadow.glowAccent,
-  },
-  dayChipText: {
-    color: '#C6CAD6',
-    fontFamily: FONTS.heavy,
-    fontSize: 14,
-  },
-  activeDayChipText: {
-    color: '#EDEDF4',
-  },
   segmentControl: {
     flexDirection: 'row',
     backgroundColor: THEME.glass.inset,
@@ -4604,47 +4443,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     textAlign: 'center',
   },
-  alarmRowCard: {
-    backgroundColor: THEME.glass.surface,
-    padding: THEME.spacing.md,
-    borderRadius: THEME.borderRadius.md,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: THEME.spacing.sm,
-    gap: 10,
-    ...THEME.shadow.soft,
-  },
-  alarmTime: {
-    fontSize: 32,
-    fontFamily: FONTS.bold,
-    color: '#EDEDF4',
-  },
-  alarmSyncMode: {
-    fontFamily: FONTS.body,
-    fontSize: 12,
-    color: '#8B90A4',
-    marginTop: 2,
-  },
-  alarmPurpose: {
-    color: '#EDEDF4',
-    fontSize: 15,
-    fontFamily: FONTS.heavy,
-    marginBottom: 2,
-  },
-  alarmDaysText: {
-    fontSize: 12,
-    color: '#0E9594',
-    marginTop: 3,
-    fontFamily: FONTS.bold,
-  },
-  alarmCreatorText: {
-    fontFamily: FONTS.body,
-    fontSize: 11,
-    color: '#8B90A4',
-    marginTop: 4,
-    fontStyle: 'italic',
-  },
   reminderDateButton: {
     backgroundColor: THEME.glass.inset,
     paddingHorizontal: 14,
@@ -4655,27 +4453,6 @@ const styles = StyleSheet.create({
     color: '#E0A458',
     fontSize: 12,
     fontFamily: FONTS.bold,
-  },
-  row: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-end',
-  },
-  actionBtnSnooze: {
-    backgroundColor: THEME.glass.accentStrong,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: THEME.borderRadius.sm,
-    marginRight: 6,
-  },
-  actionBtnDismiss: {
-    backgroundColor: THEME.glass.danger,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: THEME.borderRadius.sm,
-  },
-  disabledActionButton: {
-    opacity: 0.5,
   },
   btnText: {
     color: '#EDEDF4',
@@ -4733,11 +4510,6 @@ const styles = StyleSheet.create({
     borderRadius: THEME.borderRadius.sm,
     paddingHorizontal: 12,
     paddingVertical: 8,
-  },
-  periodResultCard: {
-    backgroundColor: THEME.glass.accent,
-    borderRadius: THEME.borderRadius.sm,
-    padding: THEME.spacing.md,
   },
   predText: {
     color: '#0E9594',
@@ -4818,71 +4590,6 @@ const styles = StyleSheet.create({
     textDecorationLine: 'line-through',
     color: THEME.colors.textMuted,
   },
-  locationPlace: {
-    color: '#EDEDF4',
-    fontSize: 18,
-    fontFamily: FONTS.bold,
-    marginBottom: 4,
-  },
-  locationCoords: {
-    color: '#8B90A4',
-    fontSize: 13,
-    fontFamily: FONTS.medium,
-    fontVariant: ['tabular-nums'],
-    marginBottom: 2,
-  },
-  locationMeta: {
-    color: '#8B90A4',
-    fontSize: 12,
-    fontFamily: FONTS.medium,
-    marginBottom: 4,
-  },
-  locationDistance: {
-    color: THEME.colors.accent,
-    fontSize: 15,
-    fontFamily: FONTS.heavy,
-    marginTop: 4,
-    marginBottom: THEME.spacing.sm,
-  },
-  locationErrorText: {
-    color: THEME.colors.danger,
-    fontSize: 12,
-    fontFamily: FONTS.semibold,
-    marginTop: THEME.spacing.sm,
-    marginBottom: THEME.spacing.xs,
-  },
-  locationSecondaryBtn: {
-    marginTop: THEME.spacing.sm,
-    paddingVertical: 14,
-    borderRadius: THEME.borderRadius.md,
-    backgroundColor: 'rgba(14, 149, 148, 0.16)',
-    alignItems: 'center',
-  },
-  locationSecondaryBtnText: {
-    color: THEME.colors.accent,
-    fontSize: 14,
-    fontFamily: FONTS.bold,
-  },
-  locationStopBtn: {
-    marginTop: THEME.spacing.sm,
-    paddingVertical: 14,
-    borderRadius: THEME.borderRadius.md,
-    backgroundColor: THEME.glass.danger,
-    alignItems: 'center',
-  },
-  locationStopBtnText: {
-    color: '#F24722',
-    fontSize: 13,
-    fontFamily: FONTS.bold,
-  },
-  locationHint: {
-    fontFamily: FONTS.body,
-    color: '#3A3F55',
-    fontSize: 11,
-    lineHeight: 15,
-    marginTop: THEME.spacing.md,
-    textAlign: 'center',
-  },
   tabBar: {
     flexDirection: 'row',
     // Near-opaque: at 0.82 the screen content behind the glass bled through as a
@@ -4933,66 +4640,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flex: 1,
     height: '100%',
-  },
-  activeTabItem: {
-    borderRadius: 24,
-    backgroundColor: 'rgba(14, 149, 148, 0.15)',
-  },
-  tabLabel: {
-    color: '#5A6078',
-    fontSize: 12,
-    fontFamily: FONTS.bold,
-    marginTop: 2,
-  },
-  activeTabLabel: {
-    color: '#0E9594',
-    fontFamily: FONTS.heavy,
-  },
-  punishmentOverlay: {
-    flex: 1,
-    backgroundColor: '#1E2030',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: THEME.spacing.lg,
-  },
-  punishTitle: {
-    fontSize: 22,
-    fontFamily: FONTS.bold,
-    color: THEME.colors.danger,
-    marginBottom: THEME.spacing.md,
-    letterSpacing: 2,
-  },
-  punishDescription: {
-    fontFamily: FONTS.body,
-    color: '#C6CAD6',
-    fontSize: 14,
-    lineHeight: 22,
-    textAlign: 'center',
-    marginBottom: THEME.spacing.lg,
-  },
-  penaltyCard: {
-    backgroundColor: THEME.glass.danger,
-    padding: THEME.spacing.md,
-    borderRadius: THEME.borderRadius.md,
-    width: '100%',
-    marginBottom: THEME.spacing.xl,
-  },
-  penaltyText: {
-    color: '#F24722',
-    fontSize: 13,
-    textAlign: 'center',
-    fontFamily: FONTS.bold,
-  },
-  resolveButton: {
-    backgroundColor: '#F24722',
-    paddingVertical: THEME.spacing.md,
-    paddingHorizontal: THEME.spacing.lg,
-    borderRadius: THEME.borderRadius.sm,
-  },
-  resolveBtnText: {
-    color: '#EDEDF4',
-    fontFamily: FONTS.bold,
-    fontSize: 14,
   },
   mutedText: {
     fontFamily: FONTS.body,
@@ -5096,11 +4743,6 @@ const styles = StyleSheet.create({
     backgroundColor: THEME.glass.danger,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  reminderDeleteText: {
-    color: '#0E9594',
-    fontSize: 12,
-    fontFamily: FONTS.heavy,
   },
   analyticsCombinedRow: {
     flexDirection: 'row',
@@ -5222,15 +4864,6 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 3,
   },
-  plusAddButtonText: {
-    color: '#EDEDF4',
-    fontSize: 24,
-    fontFamily: FONTS.heavy,
-    lineHeight: 26,
-  },
-  remindersList: {
-    gap: THEME.spacing.sm,
-  },
   noRemindersText: {
     fontFamily: FONTS.body,
     color: '#8B90A4',
@@ -5259,11 +4892,6 @@ const styles = StyleSheet.create({
   reminderCheckboxCompleted: {
     backgroundColor: '#0E9594',
     ...THEME.shadow.glowAccent,
-  },
-  checkMark: {
-    color: '#EDEDF4',
-    fontSize: 13,
-    fontFamily: FONTS.heavy,
   },
   reminderTitle: {
     flex: 1,
@@ -5607,96 +5235,6 @@ const styles = StyleSheet.create({
     color: '#F24722',
     fontFamily: FONTS.bold,
     fontSize: 12,
-    letterSpacing: 1.5,
-  },
-  ringingOverlayBg: {
-    flex: 1,
-    backgroundColor: 'rgba(30, 32, 48, 0.96)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  ringingGlassContent: {
-    width: '100%',
-    maxWidth: 380,
-    backgroundColor: 'rgba(38, 42, 64, 0.9)',
-    borderRadius: 30,
-    padding: 32,
-    alignItems: 'center',
-    ...THEME.shadow.glowAccent,
-  },
-  ringingCatRing: {
-    width: 140,
-    height: 140,
-    borderRadius: 70,
-    backgroundColor: THEME.glass.accentStrong,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 28,
-    shadowColor: '#0E9594',
-    shadowOpacity: 0.55,
-    shadowRadius: 28,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 10,
-  },
-  ringingCatGlow: {
-    width: 84,
-    height: 84,
-    tintColor: '#0E9594',
-  },
-  ringingTitle: {
-    fontSize: 16,
-    fontFamily: FONTS.heavy,
-    color: '#0E9594',
-    letterSpacing: 3,
-    marginBottom: 16,
-    textTransform: 'uppercase',
-  },
-  ringingTime: {
-    fontSize: 54,
-    fontFamily: FONTS.heavy,
-    color: '#EDEDF4',
-    letterSpacing: 2,
-    marginBottom: 12,
-  },
-  ringingPurpose: {
-    fontSize: 18,
-    fontFamily: FONTS.bold,
-    color: '#EDEDF4',
-    textAlign: 'center',
-    marginBottom: 8,
-    lineHeight: 24,
-  },
-  ringingSubText: {
-    fontSize: 12,
-    color: '#8B90A4',
-    fontFamily: FONTS.medium,
-    marginBottom: 32,
-    letterSpacing: 1,
-  },
-  ringingActionRow: {
-    flexDirection: 'row',
-    width: '100%',
-    gap: 16,
-  },
-  ringingButton: {
-    flex: 1,
-    height: 54,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  ringingSnoozeBtn: {
-    backgroundColor: THEME.glass.surfaceStrong,
-  },
-  ringingDismissBtn: {
-    backgroundColor: '#0E9594',
-    ...THEME.shadow.glowAccent,
-  },
-  ringingBtnText: {
-    color: '#EDEDF4',
-    fontFamily: FONTS.heavy,
-    fontSize: 14,
     letterSpacing: 1.5,
   },
 
