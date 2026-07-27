@@ -2,28 +2,34 @@
  * NOVIA design tokens.
  *
  * Palette is built from five source colours:
- *   #386641 forest   #6A994E moss   #A7C957 lime   #F2E8CF cream   #BC4749 brick
+ *   #0E9594 teal   #F24722 ember   #2D3047 slate   #E0E2DB mist   #EDEDF4 paper
  *
  * The app keeps its neumorphic + glassmorphic language — depth comes from
- * translucent fills and soft layered shadows, never from hard outlines — but the
- * base moved from black/orange to a deep forest ground with warm cream type and
- * lime accents, so it reads organic rather than neon.
+ * translucent fills and soft layered shadows, never from hard outlines — on a
+ * cool slate ground with near-white type. Teal is the calm primary (CTAs,
+ * active states); ember (orange-red) is reserved for destructive / alert
+ * moments; a warm amber fills the "warning/gold" slot.
+ *
+ * NOTE: the PALETTE keys below keep their original names (forest, moss, lime …)
+ * so the ~60 `PALETTE.*` references in App.tsx keep resolving — only the hex
+ * values changed. Think of the keys as slots, not literal hues:
+ *   forest → slate   moss → teal   lime → teal(primary)   brick → ember
  */
 
 // Raw palette. Prefer the semantic tokens below in components; reach for these
 // only when you need a specific hue (e.g. charts, phase indicators).
 export const PALETTE = {
-  forest: '#386641',
-  moss: '#6A994E',
-  lime: '#A7C957',
-  cream: '#F2E8CF',
-  brick: '#BC4749',
+  forest: '#2D3047',   // slate — brand base (gradients, neutral tones)
+  moss: '#0E9594',     // teal — secondary accent / success / info
+  lime: '#0E9594',     // teal — PRIMARY accent, CTAs, active states
+  cream: '#EDEDF4',    // paper — type / light ink
+  brick: '#F24722',    // ember — destructive / alert
 
-  // Derived shades that keep the ground dark enough for cream text to sit at a
+  // Derived shades that keep the ground dark enough for paper text to sit at a
   // comfortable contrast ratio.
-  forestDeep: '#0E1A11',   // app background
-  forestNight: '#132018',  // raised panels
-  forestSoft: '#1B2E20',   // pressed / inset wells
+  forestDeep: '#1E2030',   // app background
+  forestNight: '#262A40',  // raised panels
+  forestSoft: '#2D3047',   // pressed / inset wells
 } as const;
 
 /**
@@ -57,42 +63,44 @@ export const THEME = {
   fonts: FONTS,
   colors: {
     background: PALETTE.forestDeep,
-    surface: 'rgba(242, 232, 207, 0.06)',   // cream-tinted glass
-    border: 'rgba(242, 232, 207, 0.14)',    // used sparingly; prefer shadow for depth
+    surface: 'rgba(237, 237, 244, 0.06)',   // paper-tinted glass
+    border: 'rgba(237, 237, 244, 0.14)',    // used sparingly; prefer shadow for depth
     text: PALETTE.cream,
-    textMuted: 'rgba(242, 232, 207, 0.62)',
-    textFaint: 'rgba(242, 232, 207, 0.38)',
+    textMuted: 'rgba(237, 237, 244, 0.62)',
+    textFaint: 'rgba(237, 237, 244, 0.38)',
 
-    primary: PALETTE.lime,       // main accent, CTAs, active states
-    accent: PALETTE.moss,        // secondary accent
-    rust: PALETTE.brick,         // destructive / alert
+    primary: PALETTE.lime,       // main accent, CTAs, active states (teal)
+    accent: PALETTE.moss,        // secondary accent (teal)
+    rust: PALETTE.brick,         // destructive / alert (ember)
     charcoal: PALETTE.forestNight,
     forest: PALETTE.forest,
     cream: PALETTE.cream,
 
     // Mood states, pulled into the palette's range.
     mood: {
-      Happy: PALETTE.lime,
+      Happy: PALETTE.moss,
       Overwhelmed: PALETTE.brick,
-      Exhausted: '#7D8A6F',
-      'Low Energy': '#D8B863',
-      Neutral: PALETTE.forest,
+      Exhausted: '#5A6178',
+      'Low Energy': '#E0A458',
+      Neutral: '#8A90A4',
     },
 
     // Menstrual cycle phases. All entries must stay 6-digit hex — call sites
     // append a hex alpha suffix (e.g. `+ '26'`), which an rgba() string breaks.
     phase: {
-      Menstruation: PALETTE.brick,
+      // Rose — distinct from the teal primary and the ember danger, still reads
+      // as "period" and stays readable on the dark ground.
+      Menstruation: '#E0576E',
       Follicular: PALETTE.moss,
-      Ovulation: PALETTE.lime,
-      Luteal: '#D8B863',
-      Unknown: '#8A8B7C',
+      Ovulation: '#E0A458',
+      Luteal: '#9C6B9E',
+      Unknown: '#5A6178',
     },
 
     success: PALETTE.moss,
-    warning: '#D8B863',
+    warning: '#E0A458',
     danger: PALETTE.brick,
-    info: '#5B8C7E',
+    info: PALETTE.moss,
   },
   spacing: {
     xs: 4,
@@ -111,18 +119,18 @@ export const THEME = {
 
   // Translucent fills. No hard outlines — depth is carried by these plus shadow.
   glass: {
-    surface: 'rgba(242, 232, 207, 0.055)',       // resting frosted glass
-    surfaceStrong: 'rgba(242, 232, 207, 0.095)', // raised / hovered glass
+    surface: 'rgba(237, 237, 244, 0.055)',       // resting frosted glass
+    surfaceStrong: 'rgba(237, 237, 244, 0.095)', // raised / hovered glass
     inset: 'rgba(0, 0, 0, 0.26)',                // carved-in fields (inputs)
-    accent: 'rgba(167, 201, 87, 0.14)',          // active / selected tint
-    accentStrong: 'rgba(167, 201, 87, 0.22)',
-    moss: 'rgba(106, 153, 78, 0.16)',
-    danger: 'rgba(188, 71, 73, 0.14)',
-    success: 'rgba(106, 153, 78, 0.13)',
+    accent: 'rgba(14, 149, 148, 0.14)',          // active / selected tint (teal)
+    accentStrong: 'rgba(14, 149, 148, 0.22)',
+    moss: 'rgba(14, 149, 148, 0.16)',            // teal tint
+    danger: 'rgba(242, 71, 34, 0.16)',
+    success: 'rgba(14, 149, 148, 0.13)',
   },
 
   // Soft-UI shadow presets. Large, diffuse shadows lift glass off the deep
-  // forest backdrop like extruded neumorphic panels.
+  // slate backdrop like extruded neumorphic panels.
   shadow: {
     soft: {
       shadowColor: '#000000',

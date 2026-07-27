@@ -16,7 +16,7 @@
     "splash": {
       "image": "./assets/cat2.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0E1A11"
+      "backgroundColor": "#1E2030"
     },
     "ios": {
       "supportsTablet": true,
@@ -34,7 +34,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/novia-adaptive.png",
-        "backgroundColor": "#0E1A11"
+        "backgroundColor": "#1E2030"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -58,7 +58,7 @@
         "expo-notifications",
         {
           "icon": "./assets/notification-icon.png",
-          "color": "#A7C957"
+          "color": "#0E9594"
         }
       ],
       [
