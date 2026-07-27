@@ -22,6 +22,8 @@ import {
   BackHandler
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
+import Constants from 'expo-constants';
+import * as Updates from 'expo-updates';
 import { Menu, Settings as SettingsIcon, LogOut, X, User, Heart, Check, Square, CheckSquare, Home, FileText, Wallet, Activity, ListChecks, MessageSquareWarning, ChevronLeft, Send, BookOpen, Sparkles, ScrollText, CalendarHeart, Flame } from 'lucide-react-native';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, RadialGradient, Rect, Stop, Filter, FeTurbulence, FeColorMatrix, FeComposite } from 'react-native-svg';
 import * as Notifications from 'expo-notifications';
@@ -909,6 +911,7 @@ export default function App() {
 
   // Medical Record Vault
   const [medLogs, setMedLogs] = useState<any[]>([]);
+  const [openMedLog, setOpenMedLog] = useState<any | null>(null); // detail modal
   const [hospitalDate, setHospitalDate] = useState('');
   const [hospitalReason, setHospitalReason] = useState('');
   const [hospitalResults, setHospitalResults] = useState('');
@@ -3245,14 +3248,25 @@ export default function App() {
                     </View>
 
                     <Text style={styles.sectionTitle}>Hospital Visit History</Text>
+                    {medLogs.length === 0 && (
+                      <Text style={styles.emptyStateText}>No hospital visits logged yet.</Text>
+                    )}
                     {medLogs.map((log) => (
-                      <View key={log.id} style={styles.vaultRow}>
-                        <View style={{ flex: 1 }}>
+                      <TouchableOpacity
+                        key={log.id}
+                        style={styles.vaultRow}
+                        activeOpacity={0.85}
+                        onPress={() => setOpenMedLog(log)}
+                      >
+                        <View style={{ flex: 1, marginRight: 10 }}>
                           <Text style={styles.vaultText}>{getCreatorName(log.user_id)}: {log.value_json?.reason || 'Hospital visit'}</Text>
-                          <Text style={styles.financeMeta}>{log.value_json?.test_results || 'No test results added.'}</Text>
+                          <Text style={styles.financeMeta} numberOfLines={1}>{log.value_json?.test_results || 'No test results added.'}</Text>
                         </View>
-                        <Text style={styles.vaultDate}>{new Date(log.record_date).toLocaleDateString()}</Text>
-                      </View>
+                        <View style={{ alignItems: 'flex-end' }}>
+                          <Text style={styles.vaultDate}>{new Date(log.record_date).toLocaleDateString()}</Text>
+                          <Text style={styles.vaultOpenHint}>View →</Text>
+                        </View>
+                      </TouchableOpacity>
                     ))}
                   </View>
                 )}
@@ -3324,12 +3338,15 @@ export default function App() {
             </Svg>
           </View>
 
-          {/* Premium Bottom Tab Bar */}
-          <AnimatedTabBar
-            tabs={['hub', 'notes', 'finances', 'health'] as const}
-            activeTab={activeTab}
-            onChange={setActiveTab}
-          />
+          {/* Premium Bottom Tab Bar. Hidden while the drawer is open so its
+              high elevation can't poke through the drawer's scrim/panel. */}
+          {!isDrawerOpen && (
+            <AnimatedTabBar
+              tabs={['hub', 'notes', 'finances', 'health'] as const}
+              activeTab={activeTab}
+              onChange={setActiveTab}
+            />
+          )}
 
           {/* Visual Calendar Modal */}
           <Modal
@@ -3413,13 +3430,6 @@ export default function App() {
                   }
                 ]}
               >
-                <TouchableOpacity 
-                  style={styles.drawerCloseButton} 
-                  onPress={() => toggleDrawer(false)}
-                >
-                  <X color="#F4F5FA" size={20} />
-                </TouchableOpacity>
-
                 <View style={styles.drawerProfileSection}>
                   <View style={styles.drawerAvatar}>
                     <Text style={styles.drawerAvatarText}>
@@ -3493,6 +3503,16 @@ export default function App() {
                   <LogOut color="#F24722" size={20} style={{ marginRight: 12 }} />
                   <Text style={[styles.drawerMenuText, { color: '#F24722' }]}>Sign Out</Text>
                 </TouchableOpacity>
+
+                {/* Branding + running version, pinned to the bottom of the drawer. */}
+                <View style={styles.drawerFooter}>
+                  <Text style={styles.drawerBrand}>NOVIA</Text>
+                  <Text style={styles.drawerBrandTag}>Your companion, in sync.</Text>
+                  <Text style={styles.drawerVersion}>
+                    v{Constants.expoConfig?.version ?? '2.1.0'}
+                    {Updates.updateId ? ` · ${Updates.updateId.slice(0, 8)}` : ' · dev'}
+                  </Text>
+                </View>
               </Animated.View>
             </View>
           )}
@@ -3819,6 +3839,43 @@ export default function App() {
                         {u.body ? <Text style={styles.updateBody}>{u.body}</Text> : null}
                       </View>
                     ))
+                  )}
+                  <View style={{ height: 24 }} />
+                </ScrollView>
+              </View>
+            </View>
+          </Modal>
+
+          {/* Hospital Visit detail */}
+          <Modal
+            visible={!!openMedLog}
+            transparent={true}
+            animationType="slide"
+            onRequestClose={() => setOpenMedLog(null)}
+          >
+            <View style={styles.settingsModalOverlay}>
+              <View style={styles.settingsModalContent}>
+                <View style={styles.settingsHeader}>
+                  <Text style={styles.settingsTitle}>HOSPITAL VISIT</Text>
+                  <TouchableOpacity onPress={() => setOpenMedLog(null)}>
+                    <X color="#F4F5FA" size={20} />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView style={styles.settingsBody} keyboardShouldPersistTaps="handled">
+                  {openMedLog && (
+                    <>
+                      <View style={styles.rowBetween}>
+                        <Text style={styles.medDetailWho}>{getCreatorName(openMedLog.user_id)}</Text>
+                        <Text style={styles.updateDate}>{new Date(openMedLog.record_date).toLocaleDateString()}</Text>
+                      </View>
+
+                      <Text style={styles.medDetailLabel}>REASON FOR VISIT</Text>
+                      <Text style={styles.medDetailValue}>{openMedLog.value_json?.reason || 'Not specified.'}</Text>
+
+                      <Text style={styles.medDetailLabel}>TEST RESULTS / DOCTOR NOTES</Text>
+                      <Text style={styles.medDetailValue}>{openMedLog.value_json?.test_results || 'No test results added.'}</Text>
+                    </>
                   )}
                   <View style={{ height: 24 }} />
                 </ScrollView>
@@ -4706,6 +4763,37 @@ const styles = StyleSheet.create({
     color: '#8B90A4',
     fontSize: 11,
   },
+  vaultOpenHint: {
+    fontFamily: FONTS.semibold,
+    color: '#0E9594',
+    fontSize: 11,
+    marginTop: 4,
+  },
+  emptyStateText: {
+    fontFamily: FONTS.body,
+    color: '#8B90A4',
+    fontSize: 13,
+    marginBottom: THEME.spacing.sm,
+  },
+  medDetailWho: {
+    fontFamily: FONTS.bold,
+    color: '#0E9594',
+    fontSize: 15,
+  },
+  medDetailLabel: {
+    fontFamily: FONTS.heavy,
+    color: '#8B90A4',
+    fontSize: 11,
+    letterSpacing: 1.2,
+    marginTop: 18,
+    marginBottom: 6,
+  },
+  medDetailValue: {
+    fontFamily: FONTS.body,
+    color: '#EDEDF4',
+    fontSize: 15,
+    lineHeight: 22,
+  },
   bucketRow: {
     backgroundColor: THEME.glass.surface,
     padding: THEME.spacing.md,
@@ -5349,12 +5437,28 @@ const styles = StyleSheet.create({
     shadowRadius: 24,
     elevation: 20,
   },
-  drawerCloseButton: {
-    alignSelf: 'flex-end',
-    padding: 10,
-    borderRadius: 12,
-    backgroundColor: THEME.glass.surface,
-    marginBottom: 20,
+  drawerFooter: {
+    marginTop: 'auto',      // pins branding to the bottom of the drawer column
+    paddingTop: 20,
+    paddingBottom: Platform.OS === 'ios' ? 28 : 20,
+  },
+  drawerBrand: {
+    fontFamily: FONTS.displayBold,
+    fontSize: 22,
+    color: '#0E9594',
+    letterSpacing: 2,
+  },
+  drawerBrandTag: {
+    fontFamily: FONTS.body,
+    fontSize: 12,
+    color: '#8B90A4',
+    marginTop: 2,
+  },
+  drawerVersion: {
+    fontFamily: FONTS.medium,
+    fontSize: 11,
+    color: '#5A6078',
+    marginTop: 8,
   },
   drawerProfileSection: {
     alignItems: 'center',

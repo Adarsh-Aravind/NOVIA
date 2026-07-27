@@ -131,34 +131,42 @@ export const THEME = {
 
   // Soft-UI shadow presets. Large, diffuse shadows lift glass off the deep
   // slate backdrop like extruded neumorphic panels.
+  //
+  // IMPORTANT: `elevation` is 0 on every preset. Android's elevation shadow is
+  // drawn from the view's rectangular bounds and, on our translucent glass
+  // fills, rendered as a hard boxy rectangle showing through the card — the
+  // "boxy shadow" artifact. iOS soft shadows (shadowColor/Opacity/Radius/Offset)
+  // are unaffected by elevation, so keeping elevation at 0 removes the Android
+  // artifact while leaving iOS depth intact. Opaque surfaces that genuinely
+  // need Android lift (e.g. the tab bar) set their own elevation locally.
   shadow: {
     soft: {
       shadowColor: '#000000',
       shadowOpacity: 0.34,
       shadowRadius: 20,
       shadowOffset: { width: 0, height: 12 },
-      elevation: 6,
+      elevation: 0,
     },
     lifted: {
       shadowColor: '#000000',
       shadowOpacity: 0.42,
       shadowRadius: 30,
       shadowOffset: { width: 0, height: 20 },
-      elevation: 10,
+      elevation: 0,
     },
     glowAccent: {
       shadowColor: PALETTE.lime,
       shadowOpacity: 0.42,
       shadowRadius: 22,
       shadowOffset: { width: 0, height: 10 },
-      elevation: 9,
+      elevation: 0,
     },
     glowDanger: {
       shadowColor: PALETTE.brick,
       shadowOpacity: 0.40,
       shadowRadius: 20,
       shadowOffset: { width: 0, height: 10 },
-      elevation: 9,
+      elevation: 0,
     },
   },
 } as const;
