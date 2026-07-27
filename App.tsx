@@ -488,6 +488,10 @@ const TAB_ICONS: Record<string, React.ComponentType<{ size?: number; color?: str
   health: Activity,
 };
 
+// Hub sub-screens reachable from Hub cards (not on the tab bar). The device
+// back button and their on-screen back rows both return from these to the Hub.
+const HUB_SUBSCREENS = ['todos', 'milestones', 'complaints', 'bucket'];
+
 function AnimatedTabBar<T extends string>({
   tabs,
   activeTab,
@@ -881,18 +885,15 @@ export default function App() {
 
   // Android hardware / gesture back button. Walk the same "up" path the on-screen
   // back arrows do, so the device back button Just Works instead of exiting the
-  // app. Modals already close via their own <Modal onRequestClose>; the drawer is
-  // a plain overlay, so it must be handled here. Returning true swallows the
-  // press; returning false on the Hub lets Android exit the app as usual.
-  const HUB_SUBSCREENS = ['todos', 'milestones', 'complaints', 'bucket'];
+  // app. The open <Modal>s (calendar, cycle, changelog, settings) register their
+  // own back handler and close via onRequestClose before this listener is
+  // reached, so we only handle the drawer (a plain overlay) and screen
+  // navigation here. Returning true swallows the press; returning false on the
+  // Hub lets Android close the app as usual.
   useEffect(() => {
     if (Platform.OS !== 'android') return;
     const onBack = () => {
       if (isDrawerOpen) { toggleDrawer(false); return true; }
-      if (isCalendarVisible) { setIsCalendarVisible(false); setCalendarTarget(null); return true; }
-      if (isCycleModalVisible) { setIsCycleModalVisible(false); return true; }
-      if (isChangelogVisible) { setIsChangelogVisible(false); return true; }
-      if (isSettingsVisible) { setIsSettingsVisible(false); return true; }
       if (activeTab === 'complaints' && openComplaintId) { setOpenComplaintId(null); return true; }
       if (HUB_SUBSCREENS.includes(activeTab)) { setActiveTab('hub'); return true; }
       if (activeTab !== 'hub') { setActiveTab('hub'); return true; }
@@ -900,7 +901,7 @@ export default function App() {
     };
     const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
     return () => sub.remove();
-  }, [isDrawerOpen, isCalendarVisible, isCycleModalVisible, isChangelogVisible, isSettingsVisible, activeTab, openComplaintId]);
+  }, [isDrawerOpen, activeTab, openComplaintId]);
 
   // Updates / changelog
   const [appUpdates, setAppUpdates] = useState<AppUpdate[]>([]);
@@ -1822,10 +1823,11 @@ export default function App() {
   // Human-facing detail for a cycle phase. The *date math* (cycleMath) is the
   // source of truth for which phase she is in — that's what keeps the badge in
   // step with the cycle day and predicted dates. Symptoms never silently
-  // reassign the phase; only two direct biological markers can, because they are
-  // unambiguous real-time evidence that the date model may be a day or two off:
-  //   - active bleeding  -> Menstruation
-  //   - egg-white fluid   -> Ovulation
+  // reassign the phase; only two direct biological markers can, and only when
+  // they're plausibly current (see the windowing guard below), because a
+  // symptom logged at period start lingers on the record all cycle:
+  //   - active bleeding  -> Menstruation  (in the bleed window / period due)
+  //   - egg-white fluid   -> Ovulation     (in the fertile window)
   // Everything else (cramps, mood, energy) is used to colour the forecast text,
   // not to move the phase — those occur across several phases and previously
   // forced everyone into "Luteal" or "Follicular" regardless of the real day.

@@ -70,7 +70,7 @@ export const THEME = {
     textFaint: 'rgba(237, 237, 244, 0.38)',
 
     primary: PALETTE.lime,       // main accent, CTAs, active states (teal)
-    accent: PALETTE.moss,        // secondary accent (teal)
+    accent: '#3FB8B0',           // secondary accent — brighter teal, distinct from primary
     rust: PALETTE.brick,         // destructive / alert (ember)
     charcoal: PALETTE.forestNight,
     forest: PALETTE.forest,
@@ -97,7 +97,7 @@ export const THEME = {
       Unknown: '#5A6178',
     },
 
-    success: PALETTE.moss,
+    success: '#3FB8B0',          // positive / "owed to you" — brighter teal, not the primary teal
     warning: '#E0A458',
     danger: PALETTE.brick,
     info: PALETTE.moss,
@@ -126,7 +126,7 @@ export const THEME = {
     accentStrong: 'rgba(14, 149, 148, 0.22)',
     moss: 'rgba(14, 149, 148, 0.16)',            // teal tint
     danger: 'rgba(242, 71, 34, 0.16)',
-    success: 'rgba(14, 149, 148, 0.13)',
+    success: 'rgba(63, 184, 176, 0.13)',
   },
 
   // Soft-UI shadow presets. Large, diffuse shadows lift glass off the deep
