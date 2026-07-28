@@ -41,7 +41,8 @@
       "package": "com.iitznova.novia",
       "permissions": [
         "android.permission.VIBRATE",
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.health.READ_STEPS"
       ]
     },
     "web": {
@@ -54,6 +55,7 @@
     },
     "plugins": [
       "expo-audio",
+      "react-native-health-connect",
       [
         "expo-notifications",
         {
@@ -65,7 +67,7 @@
         "expo-build-properties",
         {
           "android": {
-            "minSdkVersion": 24,
+            "minSdkVersion": 26,
             "compileSdkVersion": 35,
             "targetSdkVersion": 35
           }

@@ -22,7 +22,7 @@ import {
 import { Calendar } from 'react-native-calendars';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
-import { Menu, Settings as SettingsIcon, LogOut, X, Heart, Check, Square, CheckSquare, Home, FileText, Wallet, Activity, ListChecks, MessageSquareWarning, ChevronLeft, Send, BookOpen, Sparkles, ScrollText, CalendarHeart, Flame } from 'lucide-react-native';
+import { Menu, Settings as SettingsIcon, LogOut, X, Heart, Check, Square, CheckSquare, Home, FileText, Wallet, Activity, ListChecks, MessageSquareWarning, ChevronLeft, Send, BookOpen, Sparkles, ScrollText, CalendarHeart, Flame, Footprints, Trophy } from 'lucide-react-native';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, RadialGradient, Rect, Stop, Filter, FeTurbulence, FeColorMatrix, FeComposite } from 'react-native-svg';
 import * as Notifications from 'expo-notifications';
 import { TodoRecurrence, AppUpdate, Milestone, MilestoneRecurrence } from './src/types';
@@ -34,6 +34,8 @@ import { usePeriods } from './src/hooks/usePeriods';
 import { useComplaints } from './src/hooks/useComplaints';
 import { useMilestones } from './src/hooks/useMilestones';
 import { useCheckIns } from './src/hooks/useCheckIns';
+import { useSteps } from './src/hooks/useSteps';
+import { Skeleton } from './src/components/common/Skeleton';
 import { configureNotificationsAsync, PRIORITY_CHANNEL } from './src/services/notification';
 import { cancelScheduledNotificationsByPrefix, scheduleSharedReminder, scheduleLocalNotification } from './src/services/notification';
 import { supabase } from './src/services/supabase';
@@ -707,6 +709,14 @@ export default function App() {
     partnerStreak,
     submitCheckIn,
   } = useCheckIns(coupleId, userId, partnerProfile?.id);
+  const {
+    mySteps,
+    partnerSteps,
+    status: stepsStatus,
+    loading: stepsLoading,
+    leader: stepLeader,
+    partnerIsMock: stepsPartnerIsMock,
+  } = useSteps();
   const welcomeAnim = useRef(new Animated.Value(0)).current;
   const todosRef = useRef(todos);
   todosRef.current = todos;
@@ -1935,6 +1945,16 @@ export default function App() {
     );
   }
 
+  // --- Step Duel derived values ---
+  // Only crown a leader once we have a real Health Connect read; otherwise a
+  // recorded 0 would let the (mocked) partner "win" a day you couldn't track.
+  const stepsLive = stepsStatus === 'ready';
+  const stepMax = Math.max(mySteps, partnerSteps, 1);
+  const myStepPct = Math.round((mySteps / stepMax) * 100);
+  const partnerStepPct = Math.round((partnerSteps / stepMax) * 100);
+  const myLeads = stepsLive && stepLeader === 'me';
+  const partnerLeads = stepsLive && stepLeader === 'partner';
+
   return (
     <View style={styles.appShell}>
       <SpaceBackdrop />
@@ -2164,6 +2184,86 @@ export default function App() {
                       <View style={styles.suggestionContainer}>
                         <Text style={styles.welcomeCopy}>{relationshipAdvice}</Text>
                       </View>
+                    </View>
+                    </FadeInUp>
+
+                    {/* Step Duel — daily step competition. Own steps come from
+                        Health Connect; partner steps are placeholder until sync. */}
+                    <FadeInUp index={1}>
+                    <View style={styles.sectionCard}>
+                      <View style={styles.rowBetween}>
+                        <Text style={styles.sectionHeading}>STEP DUEL</Text>
+                        <Footprints size={16} color={THEME.colors.primary} />
+                      </View>
+
+                      {stepsLoading ? (
+                        <View style={{ marginTop: 6 }}>
+                          <View style={styles.stepRow}>
+                            <Skeleton width={80} height={16} />
+                            <Skeleton width={64} height={22} />
+                          </View>
+                          <Skeleton height={10} radius={THEME.borderRadius.round} style={{ marginTop: 10, marginBottom: 18 }} />
+                          <View style={styles.stepRow}>
+                            <Skeleton width={110} height={16} delay={120} />
+                            <Skeleton width={64} height={22} delay={120} />
+                          </View>
+                          <Skeleton height={10} radius={THEME.borderRadius.round} style={{ marginTop: 10 }} delay={120} />
+                        </View>
+                      ) : (
+                        <>
+                          {/* You */}
+                          <View style={styles.stepCompetitor}>
+                            <View style={styles.stepRow}>
+                              <View style={styles.stepNameWrap}>
+                                <Text style={styles.stepName}>You</Text>
+                                {myLeads && (
+                                  <View style={styles.leaderPill}>
+                                    <Trophy size={11} color={THEME.colors.background} />
+                                    <Text style={styles.leaderPillText}>Leading</Text>
+                                  </View>
+                                )}
+                              </View>
+                              <Text style={[styles.stepValue, myLeads && styles.stepValueLead]}>
+                                {mySteps.toLocaleString()}
+                              </Text>
+                            </View>
+                            <View style={styles.stepTrack}>
+                              <View style={[styles.stepFill, myLeads ? styles.stepFillLead : styles.stepFillMuted, { width: `${myStepPct}%` }]} />
+                            </View>
+                          </View>
+
+                          {/* Partner */}
+                          <View style={[styles.stepCompetitor, { marginTop: 14 }]}>
+                            <View style={styles.stepRow}>
+                              <View style={styles.stepNameWrap}>
+                                <Text style={styles.stepName}>{partnerName}</Text>
+                                {partnerLeads && (
+                                  <View style={styles.leaderPill}>
+                                    <Trophy size={11} color={THEME.colors.background} />
+                                    <Text style={styles.leaderPillText}>Leading</Text>
+                                  </View>
+                                )}
+                              </View>
+                              <Text style={[styles.stepValue, partnerLeads && styles.stepValueLead]}>
+                                {partnerSteps.toLocaleString()}
+                              </Text>
+                            </View>
+                            <View style={styles.stepTrack}>
+                              <View style={[styles.stepFill, partnerLeads ? styles.stepFillLead : styles.stepFillMuted, { width: `${partnerStepPct}%` }]} />
+                            </View>
+                          </View>
+
+                          <Text style={styles.stepFootnote}>
+                            {stepsStatus === 'unavailable'
+                              ? 'Connect Health Connect on this phone to track your steps.'
+                              : stepsStatus === 'denied'
+                              ? 'Step access denied — enable it in Health Connect to join the duel.'
+                              : stepsPartnerIsMock
+                              ? `${partnerName}'s steps are placeholder data until sync is wired up.`
+                              : 'Steps sync from Health Connect.'}
+                          </Text>
+                        </>
+                      )}
                     </View>
                     </FadeInUp>
 
@@ -4017,6 +4117,73 @@ const styles = StyleSheet.create({
     borderRadius: THEME.borderRadius.md,
     marginBottom: THEME.spacing.md,
     ...THEME.shadow.soft,
+  },
+
+  // --- Step Duel card ---
+  stepCompetitor: {
+    marginTop: 6,
+  },
+  stepRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  stepNameWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  stepName: {
+    fontSize: 15,
+    fontFamily: FONTS.semibold,
+    color: THEME.colors.text,
+  },
+  stepValue: {
+    fontSize: 20,
+    fontFamily: FONTS.display,
+    color: THEME.colors.textMuted,
+  },
+  stepValueLead: {
+    color: THEME.colors.text,
+  },
+  stepTrack: {
+    height: 10,
+    borderRadius: THEME.borderRadius.round,
+    backgroundColor: THEME.glass.inset,
+    marginTop: 8,
+    overflow: 'hidden',
+  },
+  stepFill: {
+    height: '100%',
+    borderRadius: THEME.borderRadius.round,
+    minWidth: 6,
+  },
+  stepFillLead: {
+    backgroundColor: THEME.colors.primary,
+  },
+  stepFillMuted: {
+    backgroundColor: 'rgba(237, 237, 244, 0.22)',
+  },
+  leaderPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: THEME.borderRadius.round,
+    backgroundColor: THEME.colors.primary,
+  },
+  leaderPillText: {
+    fontSize: 10,
+    fontFamily: FONTS.bold,
+    color: THEME.colors.background,
+    letterSpacing: 0.4,
+  },
+  stepFootnote: {
+    fontSize: 11,
+    fontFamily: FONTS.body,
+    color: THEME.colors.textFaint,
+    marginTop: 14,
   },
 
   // --- Finance ledger ---
