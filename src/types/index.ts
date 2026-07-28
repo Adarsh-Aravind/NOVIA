@@ -82,6 +82,26 @@ export interface CheckIn {
   updated_at: string;
 }
 
+export interface StepCount {
+  id: string;
+  couple_id: string;
+  user_id: string;
+  step_date: string; // 'YYYY-MM-DD'
+  steps: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StepForfeit {
+  id: string;
+  couple_id: string;
+  period_key: string; // calendar quarter, e.g. '2026-Q3'
+  forfeit: string;
+  set_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SharedNote {
   id: string;
   couple_id: string;

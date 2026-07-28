@@ -715,8 +715,15 @@ export default function App() {
     status: stepsStatus,
     loading: stepsLoading,
     leader: stepLeader,
-    partnerIsMock: stepsPartnerIsMock,
-  } = useSteps();
+    partnerSynced: stepsPartnerSynced,
+    season: stepSeason,
+    streakHolder: stepStreakHolder,
+    streakCount: stepStreakCount,
+    forfeit: stepForfeit,
+    setForfeit: setStepForfeit,
+  } = useSteps(coupleId, userId, partnerProfile?.id);
+  const [stakesModalOpen, setStakesModalOpen] = useState(false);
+  const [stakesDraft, setStakesDraft] = useState('');
   const welcomeAnim = useRef(new Animated.Value(0)).current;
   const todosRef = useRef(todos);
   todosRef.current = todos;
@@ -2253,14 +2260,60 @@ export default function App() {
                             </View>
                           </View>
 
+                          <View style={styles.stepDivider} />
+
+                          {/* Win streak */}
+                          {stepStreakCount >= 2 && stepStreakHolder && (
+                            <View style={styles.streakRow}>
+                              <Flame size={14} color={THEME.colors.warning} />
+                              <Text style={styles.streakText}>
+                                {stepStreakHolder === 'me' ? 'You’re' : `${partnerName} is`} on a {stepStreakCount}-day win streak
+                              </Text>
+                            </View>
+                          )}
+
+                          {/* Season scoreboard — daily wins this quarter */}
+                          <View style={styles.seasonRow}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.seasonLabel}>SEASON · {stepSeason.label.toUpperCase()}</Text>
+                              <Text style={styles.seasonSub}>{stepSeason.daysLeft} days left</Text>
+                            </View>
+                            <View style={styles.seasonScore}>
+                              <Text style={styles.seasonSideName}>You</Text>
+                              <Text style={[styles.seasonWins, stepSeason.champion === 'me' && styles.seasonWinsLead]}>
+                                {stepSeason.myWins}
+                              </Text>
+                              <Text style={styles.seasonDash}>–</Text>
+                              <Text style={[styles.seasonWins, stepSeason.champion === 'partner' && styles.seasonWinsLead]}>
+                                {stepSeason.partnerWins}
+                              </Text>
+                              <Text style={styles.seasonSideName}>{partnerName}</Text>
+                            </View>
+                          </View>
+
+                          {/* Stakes — the forfeit the loser owes when the season ends */}
+                          <TouchableOpacity
+                            style={styles.stakesRow}
+                            activeOpacity={0.85}
+                            onPress={() => { setStakesDraft(stepForfeit || ''); setStakesModalOpen(true); }}
+                          >
+                            <View style={styles.rowBetween}>
+                              <Text style={styles.stakesLabel}>STAKES</Text>
+                              <Text style={styles.stakesAction}>{stepForfeit ? 'Edit' : 'Set'}</Text>
+                            </View>
+                            <Text style={[styles.stakesValue, !stepForfeit && styles.stakesValueEmpty]}>
+                              {stepForfeit || 'Tap to set what the loser owes the champion.'}
+                            </Text>
+                          </TouchableOpacity>
+
                           <Text style={styles.stepFootnote}>
                             {stepsStatus === 'unavailable'
                               ? 'Connect Health Connect on this phone to track your steps.'
                               : stepsStatus === 'denied'
                               ? 'Step access denied — enable it in Health Connect to join the duel.'
-                              : stepsPartnerIsMock
-                              ? `${partnerName}'s steps are placeholder data until sync is wired up.`
-                              : 'Steps sync from Health Connect.'}
+                              : !stepsPartnerSynced
+                              ? `Waiting for ${partnerName}'s first sync today.`
+                              : 'Steps sync live from Health Connect.'}
                           </Text>
                         </>
                       )}
@@ -3685,6 +3738,49 @@ export default function App() {
             </View>
           </Modal>
 
+          {/* Season Stakes Modal — set the forfeit the loser owes */}
+          <Modal
+            visible={stakesModalOpen}
+            transparent={true}
+            animationType="slide"
+            onRequestClose={() => setStakesModalOpen(false)}
+          >
+            <View style={styles.settingsModalOverlay}>
+              <View style={styles.settingsModalContent}>
+                <View style={styles.settingsHeader}>
+                  <Text style={styles.settingsTitle}>SEASON STAKES</Text>
+                  <TouchableOpacity onPress={() => setStakesModalOpen(false)}>
+                    <X color="#F4F5FA" size={20} />
+                  </TouchableOpacity>
+                </View>
+                <View>
+                  <Text style={styles.settingsHelpText}>
+                    What does the loser owe the champion when {stepSeason.label} wraps up? Either of you can set or change it.
+                  </Text>
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>THE FORFEIT</Text>
+                    <TextInput
+                      style={[styles.settingsInput, { minHeight: 84, textAlignVertical: 'top' }]}
+                      placeholder="e.g. Loser cooks dinner for a week"
+                      placeholderTextColor="#5A6078"
+                      value={stakesDraft}
+                      onChangeText={setStakesDraft}
+                      multiline
+                      maxLength={140}
+                    />
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.settingsSaveButton, !stakesDraft.trim() && { opacity: 0.5 }]}
+                    disabled={!stakesDraft.trim()}
+                    onPress={async () => { await setStepForfeit(stakesDraft); setStakesModalOpen(false); }}
+                  >
+                    <Text style={styles.settingsSaveBtnText}>SAVE STAKES</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
+
           {/* Cycle Tracker Modal — detailed prediction + editor */}
           <Modal
             visible={isCycleModalVisible}
@@ -4184,6 +4280,92 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.body,
     color: THEME.colors.textFaint,
     marginTop: 14,
+  },
+  stepDivider: {
+    height: 1,
+    backgroundColor: THEME.colors.border,
+    marginTop: 16,
+    marginBottom: 14,
+  },
+  streakRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+  },
+  streakText: {
+    fontSize: 12,
+    fontFamily: FONTS.semibold,
+    color: THEME.colors.warning,
+  },
+  seasonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  seasonLabel: {
+    fontSize: 12,
+    fontFamily: FONTS.heavy,
+    color: THEME.colors.textMuted,
+    letterSpacing: 1.2,
+  },
+  seasonSub: {
+    fontSize: 11,
+    fontFamily: FONTS.body,
+    color: THEME.colors.textFaint,
+    marginTop: 2,
+  },
+  seasonScore: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  seasonSideName: {
+    fontSize: 11,
+    fontFamily: FONTS.medium,
+    color: THEME.colors.textFaint,
+  },
+  seasonWins: {
+    fontSize: 22,
+    fontFamily: FONTS.display,
+    color: THEME.colors.textMuted,
+  },
+  seasonWinsLead: {
+    color: THEME.colors.primary,
+  },
+  seasonDash: {
+    fontSize: 16,
+    fontFamily: FONTS.body,
+    color: THEME.colors.textFaint,
+  },
+  stakesRow: {
+    marginTop: 16,
+    padding: 12,
+    borderRadius: THEME.borderRadius.sm,
+    backgroundColor: THEME.glass.inset,
+  },
+  stakesLabel: {
+    fontSize: 11,
+    fontFamily: FONTS.heavy,
+    color: THEME.colors.accent,
+    letterSpacing: 1.2,
+  },
+  stakesAction: {
+    fontSize: 11,
+    fontFamily: FONTS.bold,
+    color: THEME.colors.primary,
+    letterSpacing: 0.5,
+  },
+  stakesValue: {
+    fontSize: 13,
+    fontFamily: FONTS.medium,
+    color: THEME.colors.text,
+    marginTop: 6,
+    lineHeight: 18,
+  },
+  stakesValueEmpty: {
+    fontFamily: FONTS.body,
+    color: THEME.colors.textFaint,
   },
 
   // --- Finance ledger ---

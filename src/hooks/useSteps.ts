@@ -1,30 +1,33 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
+import { supabase } from '../services/supabase';
+import { StepCount, StepForfeit } from '../types';
 
 /**
- * Step Duel — daily step counter for the couple.
+ * Step Duel — daily step competition with a quarterly season.
  *
- * SPIKE STATUS: this reads the caller's *own* steps from Health Connect on
- * Android and degrades gracefully everywhere else. The partner's steps are
- * still MOCKED (see makeMockPartnerSteps) — real partner sync goes through
- * Supabase and is a separate piece of work. See [[novia-web-companion]] parity
- * notes if we ever surface this on the PC companion.
+ * Own steps come from Health Connect on this device; they're upserted to
+ * Supabase (public.step_counts, one row per user per day) so the partner can
+ * read them. The partner's number comes back the same way, kept live via a
+ * realtime subscription (mirrors [[useCheckIns]]).
  *
- * Why a lazy require instead of a top-level import: `react-native-health-connect`
- * is a native module. Before a fresh dev/EAS build links it (or on iOS, or in a
- * bare Metro reload after `npm install` but before prebuild), a static import
- * would tear down the whole JS bundle with a red screen. Requiring it inside a
- * try/catch keeps the app alive and lets the card fall back to an "unavailable"
- * state until the native side is really there.
+ * On top of the daily duel this derives a season from the quarter's history:
+ * a daily-win tally, the current win streak, and the champion. The "stakes"
+ * (public.step_forfeits) is the forfeit the season's loser owes — either partner
+ * may set it, and it's shared for motivation through the quarter.
+ *
+ * Why a lazy require of react-native-health-connect: it's a native module. Before
+ * a fresh dev/EAS build links it (or on iOS, or a bare Metro reload after
+ * `npm install` but before prebuild), a static import would tear down the JS
+ * bundle. Requiring it in a try/catch keeps the app alive and lets the card fall
+ * back to an "unavailable" state — the partner + season sides still work, since
+ * they're pure Supabase.
  */
 
-// 'loading'      — first read in flight
-// 'ready'        — real Health Connect steps in hand
-// 'unavailable'  — not Android, module not built, or Health Connect app missing
-// 'denied'       — Health Connect present but the user declined step access
 export type StepsStatus = 'loading' | 'ready' | 'unavailable' | 'denied';
-
 export type StepLeader = 'me' | 'partner' | 'tie';
+/** Winner of a single decided day, or the streak/season holder. */
+export type StepSide = 'me' | 'partner' | null;
 
 type HealthConnect = typeof import('react-native-health-connect');
 
@@ -41,24 +44,45 @@ function getHealthConnect(): HealthConnect | null {
   return hcModule;
 }
 
+/** Format a Date as local 'YYYY-MM-DD' (matches the DATE column semantics). */
+function toLocalISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+interface QuarterInfo {
+  startISO: string;
+  periodKey: string;
+  label: string;
+  daysLeft: number;
+}
+
+/** Calendar-quarter boundaries for the given day. */
+function quarterInfo(now = new Date()): QuarterInfo {
+  const y = now.getFullYear();
+  const q = Math.floor(now.getMonth() / 3); // 0..3
+  const startMonth = q * 3;
+  const start = new Date(y, startMonth, 1);
+  const end = new Date(y, startMonth + 3, 0); // last day of the quarter
+  const todayMid = new Date(y, now.getMonth(), now.getDate());
+  const daysLeft = Math.max(0, Math.round((end.getTime() - todayMid.getTime()) / 86400000));
+  return {
+    startISO: toLocalISODate(start),
+    periodKey: `${y}-Q${q + 1}`,
+    label: `${MONTHS[startMonth]}–${MONTHS[startMonth + 2]}`,
+    daysLeft,
+  };
+}
+
 /** Local midnight → now, as ISO strings for the Health Connect time filter. */
 function todayRange(): { startTime: string; endTime: string } {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
   return { startTime: start.toISOString(), endTime: new Date().toISOString() };
-}
-
-/**
- * Deterministic placeholder for the partner until real sync lands. Seeded by the
- * calendar date so the number is stable across refreshes within a day (a value
- * that jitters every poll would look broken), but changes day to day.
- */
-function makeMockPartnerSteps(): number {
-  const d = new Date();
-  const seed = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
-  // Cheap LCG-ish hash → 3,500–12,500 range.
-  const n = Math.abs(Math.sin(seed) * 10000);
-  return 3500 + Math.floor((n % 1) * 9000);
 }
 
 async function readTodaySteps(hc: HealthConnect): Promise<number> {
@@ -70,94 +94,287 @@ async function readTodaySteps(hc: HealthConnect): Promise<number> {
   return (result as { COUNT_TOTAL?: number })?.COUNT_TOTAL ?? 0;
 }
 
+/** Read this device's own step total from Health Connect, classifying failures. */
+async function readOwnSteps(): Promise<{ status: StepsStatus; steps: number }> {
+  if (Platform.OS !== 'android') return { status: 'unavailable', steps: 0 };
+
+  const hc = getHealthConnect();
+  if (!hc) return { status: 'unavailable', steps: 0 };
+
+  try {
+    await hc.initialize();
+
+    const sdk = await hc.getSdkStatus();
+    if (sdk !== hc.SdkAvailabilityStatus.SDK_AVAILABLE) {
+      return { status: 'unavailable', steps: 0 };
+    }
+
+    // Idempotent: if already granted, most versions resolve without a prompt.
+    const granted = await hc.requestPermission([{ accessType: 'read', recordType: 'Steps' }]);
+    if (!granted.some((p) => p.recordType === 'Steps')) {
+      return { status: 'denied', steps: 0 };
+    }
+
+    return { status: 'ready', steps: await readTodaySteps(hc) };
+  } catch (err) {
+    console.warn('[Steps] Health Connect read failed:', err);
+    return { status: 'unavailable', steps: 0 };
+  }
+}
+
+export interface StepSeason {
+  label: string; // e.g. 'Jul–Sep'
+  periodKey: string; // e.g. '2026-Q3'
+  daysLeft: number;
+  myWins: number;
+  partnerWins: number;
+  champion: StepLeader; // current standing (leader of completed days this quarter)
+}
+
 export interface UseStepsResult {
+  // Today's duel.
   mySteps: number;
   partnerSteps: number;
   status: StepsStatus;
   loading: boolean;
   leader: StepLeader;
-  /** True while the partner number is placeholder data, not real sync. */
-  partnerIsMock: boolean;
+  partnerSynced: boolean;
+  // Season.
+  season: StepSeason;
+  streakHolder: StepSide;
+  streakCount: number;
+  // Stakes.
+  forfeit: string | null;
+  forfeitSetByMe: boolean;
+  setForfeit: (text: string) => Promise<void>;
   refresh: () => void;
 }
 
-export function useSteps(): UseStepsResult {
+const emptySeason = (): StepSeason => {
+  const q = quarterInfo();
+  return { label: q.label, periodKey: q.periodKey, daysLeft: q.daysLeft, myWins: 0, partnerWins: 0, champion: 'tie' };
+};
+
+export function useSteps(
+  coupleId: string | null,
+  userId: string | null,
+  partnerId: string | null | undefined
+): UseStepsResult {
   const [mySteps, setMySteps] = useState(0);
   const [partnerSteps, setPartnerSteps] = useState(0);
+  const [partnerSynced, setPartnerSynced] = useState(false);
   const [status, setStatus] = useState<StepsStatus>('loading');
+  const [season, setSeason] = useState<StepSeason>(emptySeason);
+  const [streakHolder, setStreakHolder] = useState<StepSide>(null);
+  const [streakCount, setStreakCount] = useState(0);
+  const [forfeit, setForfeitText] = useState<string | null>(null);
+  const [forfeitSetByMe, setForfeitSetByMe] = useState(false);
+
   // Guards against setState after unmount and against overlapping reads.
   const mounted = useRef(true);
   const reading = useRef(false);
 
+  // Pull this quarter's rows for the couple: drive today's partner number, the
+  // season tally, and the win streak. Returns my own last-synced total for today
+  // so the card shows a real number before Health Connect resolves.
+  const fetchSeason = useCallback(async (): Promise<number | null> => {
+    if (!coupleId) return null;
+    const q = quarterInfo();
+    const today = toLocalISODate(new Date());
+
+    const { data, error } = await supabase
+      .from('step_counts')
+      .select('*')
+      .eq('couple_id', coupleId)
+      .gte('step_date', q.startISO)
+      .order('step_date', { ascending: false });
+
+    if (error) {
+      console.warn('[Steps] Season fetch failed:', error);
+      return null;
+    }
+
+    const rows = (data || []) as StepCount[];
+
+    // Collapse to one { me, partner } per day.
+    const byDate = new Map<string, { me?: number; partner?: number }>();
+    for (const r of rows) {
+      const slot = byDate.get(r.step_date) || {};
+      if (r.user_id === userId) slot.me = r.steps;
+      else if (partnerId && r.user_id === partnerId) slot.partner = r.steps;
+      byDate.set(r.step_date, slot);
+    }
+
+    // Today's numbers.
+    const todaySlot = byDate.get(today);
+    const partnerToday = todaySlot?.partner;
+    if (mounted.current) {
+      setPartnerSteps(partnerToday ?? 0);
+      setPartnerSynced(partnerToday != null);
+    }
+
+    // Season tally + streak over *completed* contested days (both synced, no tie).
+    const decided: { date: string; winner: 'me' | 'partner' }[] = [];
+    let myWins = 0;
+    let partnerWins = 0;
+    for (const [date, s] of byDate) {
+      if (date >= today) continue; // today is still in progress
+      if (s.me == null || s.partner == null || s.me === s.partner) continue;
+      const winner: 'me' | 'partner' = s.me > s.partner ? 'me' : 'partner';
+      if (winner === 'me') myWins++;
+      else partnerWins++;
+      decided.push({ date, winner });
+    }
+
+    decided.sort((a, b) => (a.date < b.date ? 1 : -1)); // most recent first
+    let holder: StepSide = null;
+    let count = 0;
+    for (const d of decided) {
+      if (holder === null) {
+        holder = d.winner;
+        count = 1;
+      } else if (d.winner === holder) {
+        count++;
+      } else {
+        break;
+      }
+    }
+
+    if (mounted.current) {
+      setSeason({
+        label: q.label,
+        periodKey: q.periodKey,
+        daysLeft: q.daysLeft,
+        myWins,
+        partnerWins,
+        champion: myWins === partnerWins ? 'tie' : myWins > partnerWins ? 'me' : 'partner',
+      });
+      setStreakHolder(holder);
+      setStreakCount(count);
+    }
+
+    return todaySlot?.me ?? null;
+  }, [coupleId, userId, partnerId]);
+
+  const fetchForfeit = useCallback(async () => {
+    if (!coupleId) return;
+    const { periodKey } = quarterInfo();
+    const { data, error } = await supabase
+      .from('step_forfeits')
+      .select('*')
+      .eq('couple_id', coupleId)
+      .eq('period_key', periodKey)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[Steps] Forfeit fetch failed:', error);
+      return;
+    }
+    const row = data as StepForfeit | null;
+    if (mounted.current) {
+      setForfeitText(row?.forfeit ?? null);
+      setForfeitSetByMe(!!row && row.set_by === userId);
+    }
+  }, [coupleId, userId]);
+
+  const setForfeit = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!coupleId || !userId || !trimmed) return;
+      const { periodKey } = quarterInfo();
+      const { error } = await supabase.from('step_forfeits').upsert(
+        {
+          couple_id: coupleId,
+          period_key: periodKey,
+          forfeit: trimmed,
+          set_by: userId,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'couple_id,period_key' }
+      );
+      if (error) {
+        console.warn('[Steps] Set forfeit failed:', error);
+        return;
+      }
+      await fetchForfeit();
+    },
+    [coupleId, userId, fetchForfeit]
+  );
+
   const load = useCallback(async () => {
     if (reading.current) return;
     reading.current = true;
-
-    // Partner is still mocked; set it up front so the card has both numbers even
-    // if the real read below fails.
-    if (mounted.current) setPartnerSteps(makeMockPartnerSteps());
-
-    if (Platform.OS !== 'android') {
-      if (mounted.current) setStatus('unavailable');
-      reading.current = false;
-      return;
-    }
-
-    const hc = getHealthConnect();
-    if (!hc) {
-      if (mounted.current) setStatus('unavailable');
-      reading.current = false;
-      return;
-    }
-
     try {
-      await hc.initialize();
+      // Season, partner, forfeit, and my last-synced total first — instant, and
+      // works even if Health Connect is unavailable on this device.
+      const [lastSynced] = await Promise.all([fetchSeason(), fetchForfeit()]);
+      if (lastSynced != null && mounted.current) setMySteps(lastSynced);
 
-      const sdk = await hc.getSdkStatus();
-      if (sdk !== hc.SdkAvailabilityStatus.SDK_AVAILABLE) {
-        if (mounted.current) setStatus('unavailable');
-        reading.current = false;
-        return;
-      }
+      // My live steps from Health Connect; push the fresh total to Supabase.
+      const own = await readOwnSteps();
+      if (!mounted.current) return;
+      setStatus(own.status);
 
-      // Idempotent: if already granted, most versions resolve without a prompt.
-      const granted = await hc.requestPermission([{ accessType: 'read', recordType: 'Steps' }]);
-      const hasSteps = granted.some((p) => p.recordType === 'Steps');
-      if (!hasSteps) {
-        if (mounted.current) setStatus('denied');
-        reading.current = false;
-        return;
+      if (own.status === 'ready') {
+        setMySteps(own.steps);
+        if (coupleId && userId) {
+          const { error } = await supabase.from('step_counts').upsert(
+            {
+              couple_id: coupleId,
+              user_id: userId,
+              step_date: toLocalISODate(new Date()),
+              steps: own.steps,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'user_id,step_date' }
+          );
+          if (error) console.warn('[Steps] Sync failed:', error);
+        }
       }
-
-      const steps = await readTodaySteps(hc);
-      if (mounted.current) {
-        setMySteps(steps);
-        setStatus('ready');
-      }
-    } catch (err) {
-      console.warn('[Steps] Health Connect read failed:', err);
-      if (mounted.current) setStatus('unavailable');
     } finally {
       reading.current = false;
     }
-  }, []);
+  }, [coupleId, userId, fetchSeason, fetchForfeit]);
 
   useEffect(() => {
     mounted.current = true;
+
+    if (!coupleId) {
+      setStatus('unavailable');
+      return () => {
+        mounted.current = false;
+      };
+    }
+
     load();
 
-    // Refresh when the app returns to the foreground — Google Fit → Health
-    // Connect sync lags, so steps taken while the app was backgrounded won't be
-    // in the last read.
-    const sub = AppState.addEventListener('change', (state) => {
+    // Refresh on foreground — Google Fit → Health Connect sync lags, and the
+    // partner may have synced while we were backgrounded.
+    const appStateSub = AppState.addEventListener('change', (state) => {
       if (state === 'active') load();
     });
 
+    // Live updates for both the daily counts and the stakes.
+    const channel = supabase
+      .channel(`steps-sync:${coupleId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'step_counts', filter: `couple_id=eq.${coupleId}` },
+        () => fetchSeason()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'step_forfeits', filter: `couple_id=eq.${coupleId}` },
+        () => fetchForfeit()
+      )
+      .subscribe();
+
     return () => {
       mounted.current = false;
-      sub.remove();
+      appStateSub.remove();
+      supabase.removeChannel(channel);
     };
-  }, [load]);
+  }, [coupleId, load, fetchSeason, fetchForfeit]);
 
   const leader: StepLeader =
     mySteps === partnerSteps ? 'tie' : mySteps > partnerSteps ? 'me' : 'partner';
@@ -168,7 +385,13 @@ export function useSteps(): UseStepsResult {
     status,
     loading: status === 'loading',
     leader,
-    partnerIsMock: true,
+    partnerSynced,
+    season,
+    streakHolder,
+    streakCount,
+    forfeit,
+    forfeitSetByMe,
+    setForfeit,
     refresh: load,
   };
 }
