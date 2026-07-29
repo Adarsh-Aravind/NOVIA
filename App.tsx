@@ -185,6 +185,59 @@ function PressableScale({
 }
 
 /**
+ * SubmitButton — a primary action button that guards against double-submits.
+ *
+ * Every send/save handler here does a network round-trip (a Supabase insert)
+ * before the UI updates. With a plain TouchableOpacity, a second tap during that
+ * window fires the same insert again — the reported "send it twice" bug — and the
+ * button feels dead ("delay in sending"). This wraps the async onPress: re-taps
+ * are ignored while one is in flight (a synchronous ref guard, so it holds even
+ * against a fast double-tap within one frame), and the button dims to show it's
+ * working. Drop-in replacement for the primaryButton TouchableOpacity.
+ */
+function SubmitButton({
+  children,
+  onPress,
+  style,
+  disabled = false,
+  activeOpacity = 0.85,
+}: {
+  children: React.ReactNode;
+  onPress?: () => void | Promise<unknown>;
+  style?: any;
+  disabled?: boolean;
+  activeOpacity?: number;
+}) {
+  const inFlight = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
+
+  const handlePress = async () => {
+    if (inFlight.current || disabled) return;
+    inFlight.current = true;
+    setBusy(true);
+    try {
+      await onPress?.();
+    } finally {
+      inFlight.current = false;
+      if (mounted.current) setBusy(false);
+    }
+  };
+
+  return (
+    <TouchableOpacity
+      style={[style, busy && { opacity: 0.6 }]}
+      onPress={handlePress}
+      disabled={disabled || busy}
+      activeOpacity={activeOpacity}
+    >
+      {children}
+    </TouchableOpacity>
+  );
+}
+
+/**
  * Animation budget
  * ----------------
  * Every animation in this file drives ONLY `opacity` and `transform`, with
@@ -1359,11 +1412,12 @@ export default function App() {
   };
 
   const handleAddNote = async () => {
-    if (!newNoteContent.trim()) return;
-    const success = await addNote(newNoteContent);
-    if (success) {
-      setNewNoteContent('');
-    }
+    const content = newNoteContent.trim();
+    if (!content) return;
+    // Clear the box immediately so it feels instant; restore if the send fails.
+    setNewNoteContent('');
+    const success = await addNote(content);
+    if (!success) setNewNoteContent(content);
   };
 
   const handleAddFinance = async () => {
@@ -1764,9 +1818,12 @@ export default function App() {
   };
 
   const handleAddReply = async (complaintId: string) => {
-    if (!replyText.trim()) return;
-    const created = await addReply(complaintId, replyText);
-    if (created) setReplyText('');
+    const text = replyText.trim();
+    if (!text) return;
+    // Clear immediately for a snappy send; restore the draft if it fails.
+    setReplyText('');
+    const created = await addReply(complaintId, text);
+    if (!created) setReplyText(text);
   };
 
   // Notify me when my partner files a complaint.
@@ -2419,9 +2476,9 @@ export default function App() {
                         value={checkInGratitude}
                         onChangeText={setCheckInGratitude}
                       />
-                      <TouchableOpacity style={[styles.primaryButton, { marginTop: 12 }]} onPress={() => handleSubmitCheckIn()}>
+                      <SubmitButton style={[styles.primaryButton, { marginTop: 12 }]} onPress={() => handleSubmitCheckIn()}>
                         <Text style={styles.primaryBtnText}>{myCheckIn ? 'UPDATE CHECK-IN' : 'SAVE CHECK-IN'}</Text>
-                      </TouchableOpacity>
+                      </SubmitButton>
 
                       <View style={styles.checkInPartnerRow}>
                         <View style={{ flex: 1, paddingRight: 8 }}>
@@ -2582,9 +2639,9 @@ export default function App() {
                         placeholder="Write a note for both partners..."
                         placeholderTextColor="#2B2F44"
                       />
-                      <TouchableOpacity style={styles.primaryButton} onPress={handleAddNote}>
+                      <SubmitButton style={styles.primaryButton} onPress={handleAddNote}>
                         <Text style={styles.primaryBtnText}>Add Shared Note</Text>
-                      </TouchableOpacity>
+                      </SubmitButton>
                     </View>
 
                     <View style={styles.noteGrid}>
@@ -2710,9 +2767,9 @@ export default function App() {
                         ))}
                       </View>
 
-                      <TouchableOpacity style={[styles.primaryButton, { marginTop: 16 }]} onPress={handleAddTodo}>
+                      <SubmitButton style={[styles.primaryButton, { marginTop: 16 }]} onPress={handleAddTodo}>
                         <Text style={styles.primaryBtnText}>ADD TODO</Text>
-                      </TouchableOpacity>
+                      </SubmitButton>
                     </View>
 
                     <View style={styles.sectionCard}>
@@ -2811,9 +2868,9 @@ export default function App() {
                         ))}
                       </View>
 
-                      <TouchableOpacity style={[styles.primaryButton, { marginTop: 16 }]} onPress={handleAddMilestone}>
+                      <SubmitButton style={[styles.primaryButton, { marginTop: 16 }]} onPress={handleAddMilestone}>
                         <Text style={styles.primaryBtnText}>ADD MILESTONE</Text>
-                      </TouchableOpacity>
+                      </SubmitButton>
                     </View>
 
                     <View style={styles.sectionCard}>
@@ -2899,9 +2956,9 @@ export default function App() {
                               value={replyText}
                               onChangeText={setReplyText}
                             />
-                            <TouchableOpacity style={styles.plusAddButton} onPress={() => handleAddReply(c.id)}>
+                            <SubmitButton style={styles.plusAddButton} onPress={() => handleAddReply(c.id)}>
                               <Send size={18} color="#EDEDF4" />
-                            </TouchableOpacity>
+                            </SubmitButton>
                           </View>
 
                           <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
@@ -2941,9 +2998,9 @@ export default function App() {
                             onChangeText={setNewComplaintBody}
                             multiline
                           />
-                          <TouchableOpacity style={styles.primaryButton} onPress={handleAddComplaint}>
+                          <SubmitButton style={styles.primaryButton} onPress={handleAddComplaint}>
                             <Text style={styles.primaryBtnText}>SUBMIT COMPLAINT</Text>
-                          </TouchableOpacity>
+                          </SubmitButton>
                         </View>
 
                         <View style={styles.sectionCard}>
@@ -3251,9 +3308,9 @@ export default function App() {
                             ))}
                           </View>
                         )}
-                        <TouchableOpacity style={styles.primaryButton} onPress={handleAddFinance}>
+                        <SubmitButton style={styles.primaryButton} onPress={handleAddFinance}>
                           <Text style={styles.primaryBtnText}>Log Financial Item</Text>
-                        </TouchableOpacity>
+                        </SubmitButton>
                       </View>
 
                       <Text style={styles.sectionTitle}>Shared Finance Ledger</Text>
@@ -3409,9 +3466,9 @@ export default function App() {
                         value={hospitalResults}
                         onChangeText={setHospitalResults}
                       />
-                      <TouchableOpacity style={styles.primaryButton} onPress={logHospitalVisit}>
+                      <SubmitButton style={styles.primaryButton} onPress={logHospitalVisit}>
                         <Text style={styles.primaryBtnText}>Save Hospital Visit</Text>
-                      </TouchableOpacity>
+                      </SubmitButton>
                     </View>
 
                     <Text style={styles.sectionTitle}>Hospital Visit History</Text>
@@ -3463,9 +3520,9 @@ export default function App() {
                         value={newBucketDescription}
                         onChangeText={setNewBucketDescription}
                       />
-                      <TouchableOpacity style={styles.primaryButton} onPress={handleAddBucket}>
+                      <SubmitButton style={styles.primaryButton} onPress={handleAddBucket}>
                         <Text style={styles.primaryBtnText}>Add experience to list</Text>
-                      </TouchableOpacity>
+                      </SubmitButton>
                     </View>
 
                     <Text style={styles.sectionTitle}>Our Aspirations Checklist</Text>
@@ -3715,12 +3772,12 @@ export default function App() {
                       />
                     </View>
                     
-                    <TouchableOpacity 
-                      style={styles.settingsSaveButton} 
+                    <SubmitButton
+                      style={styles.settingsSaveButton}
                       onPress={handleSaveDisplayName}
                     >
                       <Text style={styles.settingsSaveBtnText}>SAVE NAME</Text>
-                    </TouchableOpacity>
+                    </SubmitButton>
                   </View>
                   
                   <View style={styles.settingsSection}>
@@ -3792,13 +3849,13 @@ export default function App() {
                       maxLength={140}
                     />
                   </View>
-                  <TouchableOpacity
+                  <SubmitButton
                     style={[styles.settingsSaveButton, !stakesDraft.trim() && { opacity: 0.5 }]}
                     disabled={!stakesDraft.trim()}
                     onPress={async () => { await setStepForfeit(stakesDraft); setStakesModalOpen(false); }}
                   >
                     <Text style={styles.settingsSaveBtnText}>SAVE STAKES</Text>
-                  </TouchableOpacity>
+                  </SubmitButton>
                 </View>
               </View>
             </View>
@@ -3885,9 +3942,9 @@ export default function App() {
                         </View>
                       </View>
 
-                      <TouchableOpacity style={styles.primaryButton} onPress={handleAddPeriodLog}>
+                      <SubmitButton style={styles.primaryButton} onPress={handleAddPeriodLog}>
                         <Text style={styles.primaryBtnText}>Save Cycle Data</Text>
-                      </TouchableOpacity>
+                      </SubmitButton>
 
                       <TouchableOpacity
                         style={[styles.calendarPickerBtn, { marginTop: 8, marginBottom: 20, backgroundColor: 'rgba(237, 237, 244,0.06)' }]}
