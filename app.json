@@ -56,6 +56,7 @@
     "plugins": [
       "expo-audio",
       "react-native-health-connect",
+      "./plugins/withHealthConnectPermissionDelegate",
       [
         "expo-notifications",
         {
