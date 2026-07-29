@@ -4109,11 +4109,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight || 0 : 0,
   },
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   authContainer: {
     padding: THEME.spacing.md,
     alignItems: 'center',
@@ -4276,12 +4271,6 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: THEME.borderRadius.round,
     minWidth: 6,
-  },
-  stepFillLead: {
-    backgroundColor: THEME.colors.primary,
-  },
-  stepFillMuted: {
-    backgroundColor: 'rgba(237, 237, 244, 0.22)',
   },
   leaderPill: {
     flexDirection: 'row',
