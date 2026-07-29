@@ -721,6 +721,7 @@ export default function App() {
     streakCount: stepStreakCount,
     forfeit: stepForfeit,
     setForfeit: setStepForfeit,
+    requestAccess: requestStepAccess,
   } = useSteps(coupleId, userId, partnerProfile?.id);
   const [stakesModalOpen, setStakesModalOpen] = useState(false);
   const [stakesDraft, setStakesDraft] = useState('');
@@ -2306,15 +2307,21 @@ export default function App() {
                             </Text>
                           </TouchableOpacity>
 
-                          <Text style={styles.stepFootnote}>
-                            {stepsStatus === 'unavailable'
-                              ? 'Connect Health Connect on this phone to track your steps.'
-                              : stepsStatus === 'denied'
-                              ? 'Step access denied — enable it in Health Connect to join the duel.'
-                              : !stepsPartnerSynced
-                              ? `Waiting for ${partnerName}'s first sync today.`
-                              : 'Steps sync live from Health Connect.'}
-                          </Text>
+                          {stepsStatus === 'denied' ? (
+                            <TouchableOpacity activeOpacity={0.7} onPress={requestStepAccess}>
+                              <Text style={[styles.stepFootnote, styles.stepFootnoteAction]}>
+                                Tap to enable step access and join the duel.
+                              </Text>
+                            </TouchableOpacity>
+                          ) : (
+                            <Text style={styles.stepFootnote}>
+                              {stepsStatus === 'unavailable'
+                                ? 'Connect Health Connect on this phone to track your steps.'
+                                : !stepsPartnerSynced
+                                ? `Waiting for ${partnerName}'s first sync today.`
+                                : 'Steps sync live from Health Connect.'}
+                            </Text>
+                          )}
                         </>
                       )}
                     </View>
@@ -4280,6 +4287,10 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.body,
     color: THEME.colors.textFaint,
     marginTop: 14,
+  },
+  stepFootnoteAction: {
+    color: '#0E9594',
+    fontFamily: FONTS.heavy,
   },
   stepDivider: {
     height: 1,

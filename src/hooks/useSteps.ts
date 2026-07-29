@@ -94,7 +94,18 @@ async function readTodaySteps(hc: HealthConnect): Promise<number> {
   return (result as { COUNT_TOTAL?: number })?.COUNT_TOTAL ?? 0;
 }
 
-/** Read this device's own step total from Health Connect, classifying failures. */
+const STEPS_READ = { accessType: 'read', recordType: 'Steps' } as const;
+const hasStepsRead = (perms: { accessType: string; recordType: string }[]): boolean =>
+  perms.some((p) => p.recordType === 'Steps' && p.accessType === 'read');
+
+/**
+ * Read this device's own step total from Health Connect, classifying failures.
+ *
+ * This only *checks* permission (getGrantedPermissions, no dialog) — it never
+ * prompts. Firing the permission dialog automatically on cold start races with
+ * the splash/mount transition and Health Connect dismisses it, so the actual
+ * request is gesture-driven via requestStepsAccess(). See [[useSteps]].
+ */
 async function readOwnSteps(): Promise<{ status: StepsStatus; steps: number }> {
   if (Platform.OS !== 'android') return { status: 'unavailable', steps: 0 };
 
@@ -109,9 +120,8 @@ async function readOwnSteps(): Promise<{ status: StepsStatus; steps: number }> {
       return { status: 'unavailable', steps: 0 };
     }
 
-    // Idempotent: if already granted, most versions resolve without a prompt.
-    const granted = await hc.requestPermission([{ accessType: 'read', recordType: 'Steps' }]);
-    if (!granted.some((p) => p.recordType === 'Steps')) {
+    const granted = await hc.getGrantedPermissions();
+    if (!hasStepsRead(granted)) {
       return { status: 'denied', steps: 0 };
     }
 
@@ -119,6 +129,27 @@ async function readOwnSteps(): Promise<{ status: StepsStatus; steps: number }> {
   } catch (err) {
     console.warn('[Steps] Health Connect read failed:', err);
     return { status: 'unavailable', steps: 0 };
+  }
+}
+
+/**
+ * Prompt for Steps read access. MUST be called from a user gesture — a stray
+ * cold-start invocation gets auto-dismissed. Returns whether Steps read ended up
+ * granted.
+ */
+async function requestStepsAccess(): Promise<boolean> {
+  if (Platform.OS !== 'android') return false;
+
+  const hc = getHealthConnect();
+  if (!hc) return false;
+
+  try {
+    await hc.initialize();
+    const granted = await hc.requestPermission([STEPS_READ]);
+    return hasStepsRead(granted);
+  } catch (err) {
+    console.warn('[Steps] Permission request failed:', err);
+    return false;
   }
 }
 
@@ -147,6 +178,8 @@ export interface UseStepsResult {
   forfeit: string | null;
   forfeitSetByMe: boolean;
   setForfeit: (text: string) => Promise<void>;
+  /** Prompt for Health Connect Steps access (from a user tap), then refresh. */
+  requestAccess: () => Promise<void>;
   refresh: () => void;
 }
 
@@ -336,6 +369,12 @@ export function useSteps(
     }
   }, [coupleId, userId, fetchSeason, fetchForfeit]);
 
+  // Gesture-driven permission prompt; re-read once granted.
+  const requestAccess = useCallback(async () => {
+    const ok = await requestStepsAccess();
+    if (ok) await load();
+  }, [load]);
+
   useEffect(() => {
     mounted.current = true;
 
@@ -392,6 +431,7 @@ export function useSteps(
     forfeit,
     forfeitSetByMe,
     setForfeit,
+    requestAccess,
     refresh: load,
   };
 }
