@@ -8,7 +8,6 @@ import {
   ScrollView,
   SafeAreaView,
   StatusBar,
-  ActivityIndicator,
   Platform,
   Alert,
   KeyboardAvoidingView,
@@ -36,6 +35,7 @@ import { useMilestones } from './src/hooks/useMilestones';
 import { useCheckIns } from './src/hooks/useCheckIns';
 import { useSteps } from './src/hooks/useSteps';
 import { Skeleton } from './src/components/common/Skeleton';
+import { HubSkeleton } from './src/components/common/HubSkeleton';
 import { configureNotificationsAsync, PRIORITY_CHANNEL } from './src/services/notification';
 import { cancelScheduledNotificationsByPrefix, scheduleSharedReminder, scheduleLocalNotification } from './src/services/notification';
 import { supabase } from './src/services/supabase';
@@ -378,10 +378,12 @@ function AnimatedBar({
   progress,
   color,
   trackStyle,
+  fillStyle,
 }: {
   progress: number; // 0..1
   color: string;
   trackStyle?: any;
+  fillStyle?: any;
 }) {
   const anim = useRef(new Animated.Value(0)).current;
   const [width, setWidth] = useState(0);
@@ -408,6 +410,7 @@ function AnimatedBar({
         <Animated.View
           style={[
             styles.progressBarFill,
+            fillStyle,
             {
               width: '100%',
               backgroundColor: color,
@@ -1946,9 +1949,16 @@ export default function App() {
   // better than a permanently blank app if an asset fails to decode.
   if (authLoading || (!fontsLoaded && !fontError)) {
     return (
-      <View style={[styles.center, { backgroundColor: THEME.colors.background }]}>
-        <ActivityIndicator size="large" color={THEME.colors.primary} />
-        <Text style={[styles.mutedText, { marginTop: 10 }]}>Loading NOVIA...</Text>
+      <View style={styles.appShell}>
+        <SpaceBackdrop />
+        <View style={styles.container}>
+          <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+          <SafeAreaView style={{ flex: 1 }}>
+            <FadeInUp index={0}>
+              <HubSkeleton />
+            </FadeInUp>
+          </SafeAreaView>
+        </View>
       </View>
     );
   }
@@ -2235,9 +2245,12 @@ export default function App() {
                                 {mySteps.toLocaleString()}
                               </Text>
                             </View>
-                            <View style={styles.stepTrack}>
-                              <View style={[styles.stepFill, myLeads ? styles.stepFillLead : styles.stepFillMuted, { width: `${myStepPct}%` }]} />
-                            </View>
+                            <AnimatedBar
+                              progress={myStepPct / 100}
+                              color={myLeads ? THEME.colors.primary : 'rgba(237, 237, 244, 0.22)'}
+                              trackStyle={styles.stepTrack}
+                              fillStyle={styles.stepFill}
+                            />
                           </View>
 
                           {/* Partner */}
@@ -2256,9 +2269,12 @@ export default function App() {
                                 {partnerSteps.toLocaleString()}
                               </Text>
                             </View>
-                            <View style={styles.stepTrack}>
-                              <View style={[styles.stepFill, partnerLeads ? styles.stepFillLead : styles.stepFillMuted, { width: `${partnerStepPct}%` }]} />
-                            </View>
+                            <AnimatedBar
+                              progress={partnerStepPct / 100}
+                              color={partnerLeads ? THEME.colors.primary : 'rgba(237, 237, 244, 0.22)'}
+                              trackStyle={styles.stepTrack}
+                              fillStyle={styles.stepFill}
+                            />
                           </View>
 
                           <View style={styles.stepDivider} />
