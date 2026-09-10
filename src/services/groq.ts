@@ -1,8 +1,7 @@
 /**
- * Groq-backed idea generation.
+ * Groq-backed assistant: a free-form chat, and a narrow idea generator.
  *
- * Deliberately narrow: this asks for date/gift/message ideas and nothing else.
- * It sends only what the user typed — no moods, check-ins, cycle data or step
+ * Both send only what the user typed — no moods, check-ins, cycle data or step
  * history ever leave the device through here. That was a product decision, and
  * it is worth keeping: the app holds the most private things two people share,
  * and "the assistant knows everything about your relationship" is a very
@@ -37,9 +36,89 @@ const SYSTEM_PROMPT = [
   'Assume a modest budget unless told otherwise. Never mention that you are an AI.',
 ].join(' ');
 
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export interface IdeaResult {
   ideas: string[];
   error?: string;
+}
+
+export interface ChatResult {
+  reply: string;
+  error?: string;
+}
+
+/**
+ * One request path for both features, so timeout, auth and error handling can't
+ * drift apart between them.
+ */
+async function callGroq(
+  messages: { role: string; content: string }[],
+  temperature: number
+): Promise<{ text: string; error?: string }> {
+  const key = process.env.EXPO_PUBLIC_GROQ_API_KEY;
+  if (!key) {
+    return {
+      text: '',
+      error: 'No Groq key configured. Add EXPO_PUBLIC_GROQ_API_KEY to .env and restart the bundler.',
+    };
+  }
+
+  // fetch has no timeout of its own, so a stalled connection would hang the
+  // spinner indefinitely.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+  try {
+    const res = await fetch(ENDPOINT, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: MODEL, messages, temperature, max_tokens: 800 }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      // Surface the cases a user can actually act on, rather than a raw status.
+      if (res.status === 401) return { text: '', error: 'Groq rejected the API key.' };
+      if (res.status === 429) return { text: '', error: 'Rate limited — try again in a moment.' };
+      return { text: '', error: `Groq returned ${res.status}.` };
+    }
+
+    const json = await res.json();
+    return { text: json?.choices?.[0]?.message?.content ?? '' };
+  } catch (e: any) {
+    if (e?.name === 'AbortError') return { text: '', error: 'Timed out. Check your connection.' };
+    return { text: '', error: 'Could not reach Groq. Check your connection.' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const CHAT_SYSTEM_PROMPT = [
+  'You are a warm, practical assistant inside an app two partners share.',
+  'Answer whatever they ask — relationship questions, plans, or anything else.',
+  'Be concise: a couple of short paragraphs at most unless asked for more.',
+  'Plain text only, no markdown headings or bold.',
+  'You know nothing about them beyond this conversation; never pretend otherwise.',
+].join(' ');
+
+/**
+ * Free-form chat. The whole visible conversation is resent each turn, since the
+ * API is stateless — which is also why the caller trims history: an unbounded
+ * transcript would grow every request until it hit the context limit.
+ */
+export async function chatWithAI(messages: ChatMessage[]): Promise<ChatResult> {
+  if (messages.length === 0) return { reply: '' };
+  const { text, error } = await callGroq(
+    [{ role: 'system', content: CHAT_SYSTEM_PROMPT }, ...messages],
+    0.7
+  );
+  if (error) return { reply: '', error };
+  if (!text.trim()) return { reply: '', error: 'Empty reply. Try again.' };
+  return { reply: text.trim() };
 }
 
 /** Split the model's reply into individual suggestions. */
@@ -54,57 +133,19 @@ function parseIdeas(text: string): string[] {
 }
 
 export async function generateIdeas(prompt: string): Promise<IdeaResult> {
-  const key = process.env.EXPO_PUBLIC_GROQ_API_KEY;
-  if (!key) {
-    return {
-      ideas: [],
-      error: 'No Groq key configured. Add EXPO_PUBLIC_GROQ_API_KEY to .env and restart the bundler.',
-    };
-  }
-
   const trimmed = prompt.trim();
   if (!trimmed) return { ideas: [] };
 
-  // fetch has no timeout of its own, so a stalled connection would hang the
-  // spinner indefinitely.
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const { text, error } = await callGroq(
+    [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: trimmed },
+    ],
+    0.9 // ideas should vary between asks
+  );
+  if (error) return { ideas: [], error };
 
-  try {
-    const res = await fetch(ENDPOINT, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: trimmed },
-        ],
-        temperature: 0.9, // ideas should vary between asks
-        max_tokens: 500,
-      }),
-      signal: controller.signal,
-    });
-
-    if (!res.ok) {
-      // Surface the cases a user can actually act on, rather than a raw status.
-      if (res.status === 401) return { ideas: [], error: 'Groq rejected the API key.' };
-      if (res.status === 429) return { ideas: [], error: 'Rate limited — try again in a moment.' };
-      return { ideas: [], error: `Groq returned ${res.status}.` };
-    }
-
-    const json = await res.json();
-    const text: string = json?.choices?.[0]?.message?.content ?? '';
-    const ideas = parseIdeas(text);
-    if (ideas.length === 0) return { ideas: [], error: 'No ideas came back. Try rephrasing.' };
-    return { ideas };
-  } catch (e: any) {
-    if (e?.name === 'AbortError') return { ideas: [], error: 'Timed out. Check your connection.' };
-    return { ideas: [], error: 'Could not reach Groq. Check your connection.' };
-  } finally {
-    clearTimeout(timer);
-  }
+  const ideas = parseIdeas(text);
+  if (ideas.length === 0) return { ideas: [], error: 'No ideas came back. Try rephrasing.' };
+  return { ideas };
 }

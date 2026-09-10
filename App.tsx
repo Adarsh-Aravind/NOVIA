@@ -63,7 +63,7 @@ import {
 } from './src/utils/milestoneMath';
 import { BucketListItem, FinanceItem, MedicalRecord } from './src/types';
 import { getWordOfDay } from './src/constants/vocabulary';
-import { generateIdeas } from './src/services/groq';
+import { ChatMessage, chatWithAI, generateIdeas } from './src/services/groq';
 import { useFonts } from 'expo-font';
 import { Fraunces_600SemiBold } from '@expo-google-fonts/fraunces/600SemiBold';
 import { Fraunces_700Bold } from '@expo-google-fonts/fraunces/700Bold';
@@ -922,11 +922,67 @@ export default function App() {
     setForfeit: setStepForfeit,
     requestAccess: requestStepAccess,
   } = useSteps(coupleId, userId, partnerProfile?.id);
-  // --- Ideas (AI) ---
+  // --- AI chat ---
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  /**
+   * Keyboard height, tracked by hand.
+   *
+   * The composer is absolutely positioned so it stays put while the transcript
+   * scrolls, and KeyboardAvoidingView does not move an absolutely positioned
+   * child on Android. With edgeToEdgeEnabled the window doesn't resize under it
+   * either, so the keyboard simply covered the input — you could not see what
+   * you were typing. Listening for the keyboard and offsetting `bottom` is the
+   * one approach that holds regardless of soft-input mode.
+   */
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', (e) =>
+      setKeyboardHeight(e.endCoordinates.height)
+    );
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+
+  /**
+   * The API is stateless, so the whole conversation is resent every turn. Left
+   * unbounded that grows without limit until it hits the context window, and
+   * every message is paid for again on each send — so only a recent window
+   * goes over the wire.
+   */
+  const CHAT_HISTORY_LIMIT = 20;
+
+  const sendChat = async () => {
+    const text = chatInput.trim();
+    if (!text || chatLoading) return;
+
+    const next: ChatMessage[] = [...chatMessages, { role: 'user', content: text }];
+    setChatMessages(next);
+    setChatInput('');
+    setChatError(null);
+    setChatLoading(true);
+    Keyboard.dismiss();
+
+    const { reply, error } = await chatWithAI(next.slice(-CHAT_HISTORY_LIMIT));
+    if (error) {
+      setChatError(error);
+    } else {
+      setChatMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
+    }
+    setChatLoading(false);
+  };
+
+  // --- Ideas (reachable from the notes composer menu) ---
   const [ideaPrompt, setIdeaPrompt] = useState('');
   const [ideas, setIdeas] = useState<string[]>([]);
   const [ideasLoading, setIdeasLoading] = useState(false);
   const [ideasError, setIdeasError] = useState<string | null>(null);
+  const [ideasSheetOpen, setIdeasSheetOpen] = useState(false);
 
   const askForIdeas = async (starter?: string) => {
     const prompt = (starter ?? ideaPrompt).trim();
@@ -946,6 +1002,7 @@ export default function App() {
 
   const saveIdeaToNotes = async (idea: string) => {
     const ok = await addNote(idea);
+    if (ok) setIdeasSheetOpen(false);
     Alert.alert(
       ok ? 'Saved' : 'Not saved',
       ok ? 'Added to your shared notes.' : 'Could not save that. Check connectivity.'
@@ -1667,6 +1724,7 @@ export default function App() {
   };
 
   const [composerOpen, setComposerOpen] = useState(false);
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false);
 
   /**
    * Close the sheet and stop telling the partner we're typing.
@@ -2904,76 +2962,42 @@ export default function App() {
                 )}
 
                 {/* Collaborative Canvas Tab */}
-                {/* Ideas — a deliberately narrow assistant. It sends only what
-                    the user types: no moods, check-ins, cycle data or step
-                    history. See [[generateIdeas]]. */}
+                {/* Chat. Sends only the conversation itself — no moods,
+                    check-ins, cycle data or steps. See [[chatWithAI]]. */}
                 {activeTab === 'ai' && (
                   <View style={styles.tabContent}>
-                    <GlassCard style={styles.sectionCard} blur={false}>
-                      <View style={styles.rowBetween}>
-                        <Text style={styles.sectionHeading}>IDEAS</Text>
-                        <Sparkles size={16} color={THEME.colors.primary} />
-                      </View>
-
-                      <TextInput
-                        style={[styles.input, { marginTop: 4 }]}
-                        placeholder="Ask for date ideas, gifts, something to say..."
-                        placeholderTextColor={THEME.ink[35]}
-                        value={ideaPrompt}
-                        onChangeText={setIdeaPrompt}
-                        onSubmitEditing={() => askForIdeas()}
-                        returnKeyType="search"
-                      />
-
-                      {/* Starters, because a blank box is the hardest prompt to
-                          answer. Each one runs immediately rather than just
-                          filling the field. */}
-                      <View style={styles.starterRow}>
-                        {IDEA_STARTERS.map((starter) => (
-                          <TouchableOpacity
-                            key={starter}
-                            style={styles.starterChip}
-                            onPress={() => askForIdeas(starter)}
-                            activeOpacity={0.85}
-                          >
-                            <Text style={styles.starterChipText}>{starter}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-
-                      <SubmitButton style={[styles.primaryButton, { marginTop: 14 }]} onPress={() => askForIdeas()}>
-                        <Text style={styles.primaryBtnText}>{ideasLoading ? 'THINKING...' : 'GET IDEAS'}</Text>
-                      </SubmitButton>
-                    </GlassCard>
-
-                    {ideasError ? (
+                    {chatMessages.length === 0 && !chatLoading ? (
                       <GlassCard style={styles.sectionCard} blur={false}>
-                        <Text style={styles.ideaError}>{ideasError}</Text>
+                        <View style={styles.rowBetween}>
+                          <Text style={styles.sectionHeading}>ASK ANYTHING</Text>
+                          <Sparkles size={16} color={THEME.colors.primary} />
+                        </View>
+                        <Text style={styles.chatEmpty}>
+                          Plans, gift ideas, what to say when you don't know what to say —
+                          ask away. It only knows what you tell it here.
+                        </Text>
                       </GlassCard>
                     ) : null}
 
-                    {ideasLoading && ideas.length === 0 ? (
-                      <GlassCard style={styles.sectionCard} blur={false}>
-                        <Skeleton height={14} />
-                        <Skeleton height={14} style={{ marginTop: 12 }} delay={90} />
-                        <Skeleton width="72%" height={14} style={{ marginTop: 12 }} delay={180} />
-                      </GlassCard>
-                    ) : null}
-
-                    {ideas.map((idea, i) => (
-                      <FadeInUp key={`${idea}-${i}`} index={i}>
-                        <GlassCard style={styles.sectionCard} blur={false}>
-                          <Text style={styles.ideaText}>{idea}</Text>
-                          <TouchableOpacity
-                            style={styles.ideaSave}
-                            onPress={() => saveIdeaToNotes(idea)}
-                            activeOpacity={0.8}
-                          >
-                            <Text style={styles.ideaSaveText}>Save to shared notes</Text>
-                          </TouchableOpacity>
-                        </GlassCard>
-                      </FadeInUp>
+                    {chatMessages.map((m, i) => (
+                      <View
+                        key={i}
+                        style={[styles.bubble, m.role === 'user' ? styles.bubbleMine : styles.bubbleAI]}
+                      >
+                        <Text style={m.role === 'user' ? styles.bubbleMineText : styles.bubbleAIText}>
+                          {m.content}
+                        </Text>
+                      </View>
                     ))}
+
+                    {chatLoading ? (
+                      <View style={[styles.bubble, styles.bubbleAI]}>
+                        <Skeleton height={12} />
+                        <Skeleton width="68%" height={12} style={{ marginTop: 10 }} delay={110} />
+                      </View>
+                    ) : null}
+
+                    {chatError ? <Text style={styles.chatError}>{chatError}</Text> : null}
                   </View>
                 )}
 
@@ -2990,7 +3014,7 @@ export default function App() {
                       <PressableScale
                         style={styles.notesAddButton}
                         scaleTo={0.88}
-                        onPress={() => setComposerOpen(true)}
+                        onPress={() => setPlusMenuOpen(true)}
                       >
                         <Plus size={22} color={THEME.colors.background} strokeWidth={2.8} />
                       </PressableScale>
@@ -3914,6 +3938,36 @@ export default function App() {
             </Svg>
           </View>
 
+          {/* Chat composer. Lives outside the ScrollView so it stays put while
+              the transcript scrolls under it — a composer that scrolls away is
+              the single most irritating thing a chat UI can do. */}
+          {activeTab === 'ai' && !isDrawerOpen && (
+            <View
+              style={[
+                styles.chatBar,
+                // Above the dock normally; above the keyboard when it's up, at
+                // which point the dock is behind it anyway.
+                { bottom: keyboardHeight > 0 ? keyboardHeight + 12 : TAB_BAR_BOTTOM + 78 },
+              ]}
+            >
+              <GlassCard style={styles.chatBarInner} tier="chrome" radius={THEME.borderRadius.xl}>
+                <TextInput
+                  style={styles.chatInput}
+                  placeholder="Ask anything..."
+                  placeholderTextColor={THEME.ink[35]}
+                  value={chatInput}
+                  onChangeText={setChatInput}
+                  onSubmitEditing={sendChat}
+                  returnKeyType="send"
+                  multiline
+                />
+                <PressableScale style={styles.chatSend} scaleTo={0.88} onPress={sendChat}>
+                  <Send size={18} color={THEME.colors.background} strokeWidth={2.6} />
+                </PressableScale>
+              </GlassCard>
+            </View>
+          )}
+
           {/* Premium Bottom Tab Bar. Hidden while the drawer is open so its
               high elevation can't poke through the drawer's scrim/panel. */}
           {!isDrawerOpen && (
@@ -3930,6 +3984,107 @@ export default function App() {
               }}
             />
           )}
+
+          {/* Two ways to fill a note, so the plus asks which rather than
+              assuming. Anchored to the top-right because that is where the
+              button that opened it lives — a menu that appears somewhere else
+              breaks the link to what you pressed. */}
+          <Modal visible={plusMenuOpen} transparent animationType="fade" onRequestClose={() => setPlusMenuOpen(false)}>
+            <TouchableOpacity
+              style={styles.plusMenuScrim}
+              activeOpacity={1}
+              onPress={() => setPlusMenuOpen(false)}
+            >
+              <GlassCard style={styles.plusMenu} tier="chrome" radius={THEME.borderRadius.md}>
+                <TouchableOpacity
+                  style={styles.plusMenuItem}
+                  activeOpacity={0.8}
+                  onPress={() => { setPlusMenuOpen(false); setComposerOpen(true); }}
+                >
+                  <FileText size={18} color={THEME.colors.primary} />
+                  <Text style={styles.plusMenuText}>Write a note</Text>
+                </TouchableOpacity>
+                <View style={styles.plusMenuDivider} />
+                <TouchableOpacity
+                  style={styles.plusMenuItem}
+                  activeOpacity={0.8}
+                  onPress={() => { setPlusMenuOpen(false); setIdeasSheetOpen(true); }}
+                >
+                  <Sparkles size={18} color={THEME.colors.primary} />
+                  <Text style={styles.plusMenuText}>Get ideas from AI</Text>
+                </TouchableOpacity>
+              </GlassCard>
+            </TouchableOpacity>
+          </Modal>
+
+          {/* Ideas sheet. Lives here rather than in its own tab because its
+              output is a note — the action and its destination belong together. */}
+          <Modal visible={ideasSheetOpen} transparent animationType="slide" onRequestClose={() => setIdeasSheetOpen(false)}>
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              style={styles.settingsModalOverlay}
+            >
+              <GlassCard style={styles.settingsModalContent} tier="chrome" radius={24}>
+                <View style={styles.settingsHeader}>
+                  <Text style={styles.settingsTitle}>GET IDEAS</Text>
+                  <TouchableOpacity onPress={() => setIdeasSheetOpen(false)} hitSlop={PRESS_HIT_SLOP}>
+                    <X size={22} color={THEME.colors.text} />
+                  </TouchableOpacity>
+                </View>
+
+                <TextInput
+                  style={styles.input}
+                  placeholder="Dates, gifts, what to say..."
+                  placeholderTextColor={THEME.ink[35]}
+                  value={ideaPrompt}
+                  onChangeText={setIdeaPrompt}
+                  onSubmitEditing={() => askForIdeas()}
+                  returnKeyType="search"
+                />
+
+                {/* Starters, because a blank box is the hardest prompt to
+                    answer. Each runs immediately rather than filling the field. */}
+                <View style={styles.starterRow}>
+                  {IDEA_STARTERS.map((starter) => (
+                    <TouchableOpacity
+                      key={starter}
+                      style={styles.starterChip}
+                      onPress={() => askForIdeas(starter)}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.starterChipText}>{starter}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <SubmitButton style={[styles.primaryButton, { marginTop: 14 }]} onPress={() => askForIdeas()}>
+                  <Text style={styles.primaryBtnText}>{ideasLoading ? 'THINKING...' : 'GET IDEAS'}</Text>
+                </SubmitButton>
+
+                {ideasError ? <Text style={styles.chatError}>{ideasError}</Text> : null}
+
+                <ScrollView style={styles.ideaScroll} keyboardShouldPersistTaps="handled">
+                  {ideasLoading && ideas.length === 0 ? (
+                    <View style={{ marginTop: 14 }}>
+                      <Skeleton height={13} />
+                      <Skeleton height={13} style={{ marginTop: 10 }} delay={90} />
+                    </View>
+                  ) : null}
+                  {ideas.map((idea, i) => (
+                    <TouchableOpacity
+                      key={`${idea}-${i}`}
+                      style={styles.ideaRow}
+                      activeOpacity={0.85}
+                      onPress={() => saveIdeaToNotes(idea)}
+                    >
+                      <Text style={styles.ideaText}>{idea}</Text>
+                      <Text style={styles.ideaSaveText}>Tap to save as a note</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </GlassCard>
+            </KeyboardAvoidingView>
+          </Modal>
 
           {/* Note composer. A sheet rather than an inline box, so the notes
               screen spends its space on notes. */}
@@ -5111,6 +5266,80 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.bold,
     color: THEME.colors.text,
   },
+  chatEmpty: {
+    fontFamily: FONTS.body,
+    fontSize: 13,
+    lineHeight: 20,
+    color: THEME.colors.textMuted,
+  },
+  bubble: {
+    maxWidth: '86%',
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: THEME.borderRadius.md,
+    marginBottom: 10,
+  },
+  // The user's own turns are the accent; the assistant's are glass. Asymmetric
+  // corners on the "tail" side so the two sides read as a conversation rather
+  // than as a list of equal blocks.
+  bubbleMine: {
+    alignSelf: 'flex-end',
+    backgroundColor: THEME.colors.primary,
+    borderBottomRightRadius: 6,
+  },
+  bubbleMineText: {
+    fontFamily: FONTS.medium,
+    fontSize: 14,
+    lineHeight: 20,
+    color: THEME.colors.background,
+  },
+  bubbleAI: {
+    ...THEME.material.regular,
+    alignSelf: 'flex-start',
+    borderBottomLeftRadius: 6,
+  },
+  bubbleAIText: {
+    fontFamily: FONTS.body,
+    fontSize: 14,
+    lineHeight: 21,
+    color: THEME.colors.text,
+  },
+  chatError: {
+    fontFamily: FONTS.body,
+    fontSize: 13,
+    color: THEME.colors.danger,
+    marginTop: 4,
+  },
+  chatBar: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    zIndex: 20,
+  },
+  chatBarInner: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+    paddingVertical: 8,
+    paddingLeft: 16,
+    paddingRight: 8,
+  },
+  chatInput: {
+    flex: 1,
+    fontFamily: FONTS.body,
+    fontSize: 15,
+    color: THEME.colors.text,
+    maxHeight: 110,
+    paddingVertical: 8,
+  },
+  chatSend: {
+    width: 40,
+    height: 40,
+    borderRadius: THEME.borderRadius.round,
+    backgroundColor: THEME.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   starterRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -5136,19 +5365,48 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     color: THEME.colors.text,
   },
-  ideaSave: {
-    marginTop: 12,
-    alignSelf: 'flex-start',
+  plusMenuScrim: {
+    flex: 1,
+    backgroundColor: alpha(THEME.ink[0], 0.55),
+    paddingTop: 96,
+    paddingRight: 16,
+    alignItems: 'flex-end',
+  },
+  plusMenu: {
+    minWidth: 220,
+    paddingVertical: 4,
+  },
+  plusMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  plusMenuText: {
+    fontFamily: FONTS.semibold,
+    fontSize: 14,
+    color: THEME.colors.text,
+  },
+  plusMenuDivider: {
+    height: 1,
+    backgroundColor: alpha(THEME.ink[95], 0.08),
+    marginHorizontal: 12,
+  },
+  ideaScroll: {
+    maxHeight: 260,
+    marginTop: 6,
+  },
+  ideaRow: {
+    ...THEME.material.well,
+    borderRadius: THEME.borderRadius.sm,
+    padding: 12,
+    marginTop: 10,
   },
   ideaSaveText: {
     fontFamily: FONTS.semibold,
     fontSize: 12,
     color: THEME.colors.primary,
-  },
-  ideaError: {
-    fontFamily: FONTS.body,
-    fontSize: 13,
-    color: THEME.colors.danger,
   },
   moodRow: {
     flexDirection: 'row',
@@ -6317,26 +6575,6 @@ const styles = StyleSheet.create({
   milestoneRowEmoji: {
     fontSize: 22,
     marginRight: 12,
-  },
-  vocabWord: {
-    color: THEME.ink[95],
-    fontSize: 22,
-    fontFamily: FONTS.displayBold,
-    marginTop: 6,
-  },
-  vocabMeaning: {
-    fontFamily: FONTS.body,
-    color: THEME.ink[100],
-    fontSize: 14,
-    marginTop: 6,
-    lineHeight: 20,
-  },
-  vocabExample: {
-    fontFamily: FONTS.display,
-    color: THEME.ink[50],
-    fontSize: 13,
-    fontStyle: 'italic',
-    marginTop: 8,
   },
   statusChip: {
     paddingHorizontal: 8,
