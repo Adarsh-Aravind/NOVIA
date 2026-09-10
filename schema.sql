@@ -2,6 +2,7 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Clean up any existing tables to avoid duplicate relations
+DROP TABLE IF EXISTS public.transactions CASCADE;
 DROP TABLE IF EXISTS public.step_forfeits CASCADE;
 DROP TABLE IF EXISTS public.step_counts CASCADE;
 DROP TABLE IF EXISTS public.check_ins CASCADE;
@@ -260,6 +261,26 @@ CREATE TABLE public.step_forfeits (
     CONSTRAINT uniq_forfeit_per_period UNIQUE (couple_id, period_key)
 );
 
+-- 18. Auto-detected payments between the partners, observed by the Android
+--     notification listener. Parsed fields only — the raw notification text is
+--     never stored, since it is sensitive and would be replicated here verbatim.
+--     `direction` is stated relative to `user_id`, the device that saw it.
+CREATE TABLE public.transactions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    couple_id UUID NOT NULL REFERENCES public.couples(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    direction TEXT NOT NULL CHECK (direction IN ('sent', 'received')),
+    amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
+    counterparty TEXT NOT NULL,
+    source_package TEXT NOT NULL,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    dedup_key TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    -- Guards against Android re-posting the same notification to the same
+    -- device. Cross-device duplicates are handled in record_transaction().
+    CONSTRAINT uniq_txn_per_device UNIQUE (couple_id, user_id, dedup_key)
+);
+
 ---
 --- ROW LEVEL SECURITY & RELATIONAL ACCESS POLICIES
 ---
@@ -284,6 +305,7 @@ ALTER TABLE public.milestones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.check_ins ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.step_counts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.step_forfeits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 
 -- Helper Function to resolve current user's active couple ID
 CREATE OR REPLACE FUNCTION public.get_couple_id()
@@ -547,6 +569,19 @@ CREATE POLICY "Delete own medical records"
     ON public.medical_vault FOR DELETE
     USING (user_id = auth.uid());
 
+-- Detected payments: both partners read every row in the couple, each user
+-- writes only what their own device observed. No UPDATE policy — an observed
+-- payment is a fact, not something to edit.
+CREATE POLICY "Read couple transactions"
+    ON public.transactions FOR SELECT
+    USING (couple_id = public.get_couple_id());
+CREATE POLICY "Insert own transactions"
+    ON public.transactions FOR INSERT
+    WITH CHECK (couple_id = public.get_couple_id() AND user_id = auth.uid());
+CREATE POLICY "Delete own transactions"
+    ON public.transactions FOR DELETE
+    USING (user_id = auth.uid());
+
 -- Triggers for Profile Creation on user sign-up
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER
@@ -659,6 +694,88 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
+-- record_transaction — the only write path for detected payments.
+-- Both phones witness the same payment from opposite sides: his "You paid ₹500
+-- to Gayathri" and her "₹500 received from Adarsh" are one event, and a naive
+-- insert-on-both would show the couple every transfer twice.
+--
+-- A dedup_key built from an amount plus a minute bucket cannot solve this on
+-- its own: the two notifications land seconds apart and routinely straddle a
+-- minute boundary, and the phones' clocks need not agree. So the pairing test
+-- lives here instead, where both devices meet, and is deliberately narrow —
+-- it merges only a row from the *other* partner, in the *opposite* direction,
+-- for the same amount, within PAIR_WINDOW. Three minutes rather than one:
+-- the carrier does not deliver the two banks' texts simultaneously, and a
+-- window too tight shows the couple every transfer twice. Two genuine payments
+-- of the same amount in the same direction are never collapsed.
+--
+-- The advisory lock serialises the check-then-insert per couple, so two
+-- devices posting simultaneously can't both miss each other's row.
+CREATE OR REPLACE FUNCTION public.record_transaction(
+    p_direction TEXT,
+    p_amount NUMERIC,
+    p_counterparty TEXT,
+    p_source_package TEXT,
+    p_occurred_at TIMESTAMPTZ,
+    p_dedup_key TEXT
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_couple_id UUID;
+    v_existing UUID;
+    v_id UUID;
+    PAIR_WINDOW CONSTANT INTERVAL := INTERVAL '3 minutes';
+BEGIN
+    SELECT couple_id INTO v_couple_id FROM public.profiles WHERE id = auth.uid();
+    IF v_couple_id IS NULL THEN
+        RAISE EXCEPTION 'not paired';
+    END IF;
+
+    IF p_direction NOT IN ('sent', 'received') THEN
+        RAISE EXCEPTION 'bad direction';
+    END IF;
+
+    PERFORM pg_advisory_xact_lock(hashtextextended(v_couple_id::TEXT, 0));
+
+    -- The partner already logged this same payment from the other side.
+    SELECT id INTO v_existing
+    FROM public.transactions
+    WHERE couple_id = v_couple_id
+      AND user_id <> auth.uid()
+      AND direction <> p_direction
+      AND amount = p_amount
+      AND occurred_at BETWEEN p_occurred_at - PAIR_WINDOW AND p_occurred_at + PAIR_WINDOW
+    LIMIT 1;
+
+    IF v_existing IS NOT NULL THEN
+        RETURN v_existing;
+    END IF;
+
+    INSERT INTO public.transactions
+        (couple_id, user_id, direction, amount, counterparty, source_package, occurred_at, dedup_key)
+    VALUES
+        (v_couple_id, auth.uid(), p_direction, p_amount, p_counterparty, p_source_package, p_occurred_at, p_dedup_key)
+    ON CONFLICT (couple_id, user_id, dedup_key) DO NOTHING
+    RETURNING id INTO v_id;
+
+    IF v_id IS NULL THEN
+        -- Lost to our own earlier insert of the identical notification.
+        SELECT id INTO v_id
+        FROM public.transactions
+        WHERE couple_id = v_couple_id AND user_id = auth.uid() AND dedup_key = p_dedup_key;
+    END IF;
+
+    RETURN v_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.record_transaction(TEXT, NUMERIC, TEXT, TEXT, TIMESTAMPTZ, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.record_transaction(TEXT, NUMERIC, TEXT, TEXT, TIMESTAMPTZ, TEXT) TO authenticated;
+
 -- Database performance index optimizations for speed
 CREATE INDEX idx_profiles_couple_id ON public.profiles(couple_id);
 CREATE INDEX idx_complaints_couple_created ON public.complaints(couple_id, created_at DESC);
@@ -673,6 +790,7 @@ CREATE INDEX idx_milestones_couple_date ON public.milestones(couple_id, mileston
 CREATE INDEX idx_checkins_couple_date ON public.check_ins(couple_id, check_in_date DESC);
 CREATE INDEX idx_steps_couple_date ON public.step_counts(couple_id, step_date DESC);
 CREATE INDEX idx_forfeits_couple_period ON public.step_forfeits(couple_id, period_key);
+CREATE INDEX idx_txn_couple_time ON public.transactions(couple_id, occurred_at DESC);
 
 ---
 --- SUPABASE REALTIME
@@ -707,7 +825,8 @@ BEGIN
         'bucket_list',
         'app_updates',
         'step_counts',
-        'step_forfeits'
+        'step_forfeits',
+        'transactions'
     ]
     LOOP
         EXECUTE format('ALTER TABLE public.%I REPLICA IDENTITY FULL', t);

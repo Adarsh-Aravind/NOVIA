@@ -97,26 +97,3 @@ export async function cancelScheduledNotificationsByPrefix(prefix: string) {
   );
 }
 
-export async function scheduleSharedReminder({
-  reminderKey,
-  title,
-  body,
-  date,
-  channelId = REMINDERS_CHANNEL,
-}: {
-  reminderKey: string;
-  title: string;
-  body: string;
-  date: Date;
-  channelId?: ChannelId;
-}) {
-  if (date.getTime() <= Date.now()) return null;
-
-  return await scheduleLocalNotification({
-    title,
-    body,
-    trigger: date as any,
-    channelId,
-    data: { reminderKey },
-  });
-}

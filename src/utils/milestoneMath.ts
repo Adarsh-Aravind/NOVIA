@@ -1,5 +1,5 @@
 import { Milestone } from '../types';
-import { parseLocalDate } from './financeMath';
+import { parseLocalDate } from './dateUtils';
 
 /** Local-midnight copy of a date, so day comparisons ignore the clock time. */
 function atMidnight(d: Date): Date {

@@ -1,0 +1,47 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <!-- The bank texts every UPI transfer, so SMS is the primary signal. Unlike
+       notification access this is an ordinary runtime permission: one dialog,
+       no trip into Settings. -->
+  <uses-permission android:name="android.permission.RECEIVE_SMS" />
+
+  <!-- Not a runtime permission: it only lets the OS bind our service once the
+       user enables the app under Settings -> Notifications -> Notification
+       access. There is no dialog to prompt for it. -->
+  <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" />
+  <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+  <application>
+    <!-- Declared in the library manifest so AGP's manifest merger folds it into
+         the app. Continuous Native Generation regenerates android/ on every EAS
+         build, so anything written into the app manifest by hand would be lost.
+         Class names are fully qualified rather than relative: the merger
+         resolves a leading-dot name against the *application* package, which is
+         com.iitznova.novia, not this module's. -->
+
+    <!-- exported must be true so the system can bind it; the permission
+         attribute is what keeps everyone else out. -->
+    <service
+      android:name="expo.modules.notificationlistener.NoviaNotificationListenerService"
+      android:label="NOVIA payment detection"
+      android:exported="true"
+      android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+      <intent-filter>
+        <action android:name="android.service.notification.NotificationListenerService" />
+      </intent-filter>
+    </service>
+
+    <!-- SMS_RECEIVED is a protected broadcast: only the system can send it, so
+         an exported receiver here is not an entry point for other apps. The
+         high priority is conventional for this action and does not abort
+         delivery to anyone else. -->
+    <receiver
+      android:name="expo.modules.notificationlistener.NoviaSmsReceiver"
+      android:exported="true"
+      android:permission="android.permission.BROADCAST_SMS">
+      <intent-filter android:priority="999">
+        <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+      </intent-filter>
+    </receiver>
+  </application>
+</manifest>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -20,10 +20,11 @@ import {
   BackHandler,
   PanResponder
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Calendar } from 'react-native-calendars';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
-import { Menu, Settings as SettingsIcon, LogOut, X, Heart, Check, Square, CheckSquare, Home, FileText, Wallet, Activity, ListChecks, MessageSquareWarning, ChevronLeft, Plus, Send, BookOpen, Sparkles, ScrollText, CalendarHeart, Flame, Footprints, Trophy } from 'lucide-react-native';
+import { Menu, Settings as SettingsIcon, LogOut, X, Heart, Check, Square, CheckSquare, Home, FileText, Wallet, Activity, ListChecks, MessageSquareWarning, ChevronLeft, Plus, Send, BookOpen, Sparkles, ScrollText, CalendarHeart, Flame, Footprints, Trophy, ArrowUpRight, ArrowDownLeft, BellRing, BatteryWarning, Pencil } from 'lucide-react-native';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, RadialGradient, Rect, Stop } from 'react-native-svg';
 import * as Notifications from 'expo-notifications';
 import { TodoRecurrence, AppUpdate, Milestone, MilestoneRecurrence } from './src/types';
@@ -41,19 +42,14 @@ import { HubSkeleton } from './src/components/common/HubSkeleton';
 import { GlassBacking, GlassCard } from './src/components/common/GlassCard';
 import { StepGraph } from './src/components/common/StepGraph';
 import { configureNotificationsAsync, PRIORITY_CHANNEL } from './src/services/notification';
-import { cancelScheduledNotificationsByPrefix, scheduleSharedReminder, scheduleLocalNotification } from './src/services/notification';
+import { cancelScheduledNotificationsByPrefix, scheduleLocalNotification } from './src/services/notification';
 import { supabase } from './src/services/supabase';
 import { applyPendingUpdate, checkAndApplyUpdate, fetchAppUpdates, fetchUpdateInBackground, getLastSeenUpdateAt, markUpdatesSeen, unseenUpdates } from './src/services/updates';
 import { claimNotification, getOrCreateBaseline, pruneNotifiedMarkers } from './src/services/notifyOnce';
 import { withLock } from './src/utils/asyncLock';
-import {
-  isOverdue,
-  isRecurring,
-  nextDueDate,
-  parseLocalDate,
-  summarizeFinances,
-  toLocalISODate,
-} from './src/utils/financeMath';
+import { parseLocalDate } from './src/utils/dateUtils';
+import { directionFor, useTransactions } from './src/hooks/useTransactions';
+import { openSettings as openListenerSettings, requestIgnoreBatteryOptimizations } from './modules/notification-listener';
 import {
   daysUntilNext,
   elapsedAt,
@@ -61,7 +57,7 @@ import {
   nextOccurrence,
   occursOn,
 } from './src/utils/milestoneMath';
-import { BucketListItem, FinanceItem, MedicalRecord } from './src/types';
+import { BucketListItem, MedicalRecord } from './src/types';
 import { getWordOfDay } from './src/constants/vocabulary';
 import { ChatMessage, chatWithAI, generateIdeas } from './src/services/groq';
 import { useFonts } from 'expo-font';
@@ -104,6 +100,56 @@ const IDEA_STARTERS = [
 const MILESTONE_EMOJIS = ['💛', '💍', '🌹', '🎉', '✈️', '🏡', '🎂', '⭐'] as const;
 
 const PHASE_COLORS = THEME.colors.phase;
+
+/**
+ * Payment apps, by package name. Anything not listed still logs correctly —
+ * the label just falls back to nothing rather than showing a raw package.
+ */
+const PAYMENT_APPS: Record<string, string> = {
+  'com.google.android.apps.nbu.paisa.user': 'Google Pay',
+  'com.phonepe.app': 'PhonePe',
+  'net.one97.paytm': 'Paytm',
+  'com.paypal.android.p2pmobile': 'PayPal',
+  'com.sbi.lotusintouch': 'SBI',
+  // Synthetic: a bank SMS rather than an app notification. The couple's own
+  // bank texts every UPI transfer, which makes this the common case.
+  'android.sms': 'Bank SMS',
+};
+
+/** Extra names to match a payment against, beyond the partner's profile name. */
+const PARTNER_ALIAS_KEY = 'novia.payments.partnerAliases';
+
+/**
+ * Indian digit grouping — 1,00,000 rather than 100,000.
+ *
+ * Worth the eight lines: these are rupee amounts read by two people in India,
+ * and western grouping is the kind of small wrongness that makes an app feel
+ * like it was built for somewhere else.
+ */
+function formatAmount(value: number): string {
+  const fixed = value % 1 === 0 ? String(Math.round(value)) : value.toFixed(2);
+  const [whole, fraction] = fixed.split('.');
+  const last3 = whole.slice(-3);
+  const rest = whole.slice(0, -3);
+  const grouped = rest ? `${rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',')},${last3}` : last3;
+  return fraction ? `${grouped}.${fraction}` : grouped;
+}
+
+/** 'Today' / 'Yesterday' / '8 Sep' — the heading a run of payments sits under. */
+function formatDayLabel(iso: string): string {
+  const date = new Date(iso);
+  const today = new Date();
+  const startOf = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((startOf(today) - startOf(date)) / 86_400_000);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+
+function formatClock(iso: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
 
 /**
  * The ground: one neon-orange source burning in the top-left corner, falling
@@ -793,7 +839,7 @@ const BlinkingBucketRow = ({ item, getCreatorName, onToggle, onDelete }: { item:
             </Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Text style={[styles.financeMeta, { fontSize: 10, opacity: 0.6, marginRight: 12 }]}>By {getCreatorName(item.created_by)}</Text>
+            <Text style={[styles.metaLine, { fontSize: 10, opacity: 0.6, marginRight: 12 }]}>By {getCreatorName(item.created_by)}</Text>
             <TouchableOpacity 
               onPress={(e) => {
                 e.stopPropagation();
@@ -922,6 +968,83 @@ export default function App() {
     setForfeit: setStepForfeit,
     requestAccess: requestStepAccess,
   } = useSteps(coupleId, userId, partnerProfile?.id);
+
+  // --- Detected payments ---
+  /**
+   * Extra names to match against, kept on the device.
+   *
+   * The name a payment app shows is whatever the bank has on file, and it is
+   * routinely not the name in the app's profile — "G Udhayan", a maiden name,
+   * an initial. Rather than guess at those, the screen lets the user add the
+   * name they actually see, which is the only reliable source for it.
+   */
+  const [customAliases, setCustomAliases] = useState<string[]>([]);
+  const [aliasSheetOpen, setAliasSheetOpen] = useState(false);
+  const [aliasDraft, setAliasDraft] = useState('');
+
+  useEffect(() => {
+    AsyncStorage.getItem(PARTNER_ALIAS_KEY)
+      .then((raw) => {
+        if (raw) setCustomAliases(JSON.parse(raw));
+      })
+      .catch(() => {
+        /* first run, or storage cleared — the profile name alone still works */
+      });
+  }, []);
+
+  const saveAliases = async () => {
+    const parsed = aliasDraft
+      .split(',')
+      .map((name) => name.trim())
+      .filter(Boolean);
+    setCustomAliases(parsed);
+    setAliasSheetOpen(false);
+    try {
+      await AsyncStorage.setItem(PARTNER_ALIAS_KEY, JSON.stringify(parsed));
+    } catch (e) {
+      Alert.alert('Could not save', 'The names will apply until the app restarts.');
+    }
+  };
+
+  const partnerLabel = partnerProfile?.display_name || partnerName || 'your partner';
+
+  const paymentAliases = useMemo(
+    () =>
+      [partnerProfile?.display_name, partnerName, ...customAliases].filter(
+        (name): name is string => !!name && name.trim().length > 0
+      ),
+    [partnerProfile?.display_name, partnerName, customAliases]
+  );
+
+  const {
+    transactions,
+    loading: paymentsLoading,
+    supported: paymentsSupported,
+    permitted: paymentsPermitted,
+    batteryExempt: paymentsBatteryExempt,
+    smsGranted: paymentsSmsGranted,
+    requestSms: requestPaymentsSms,
+    recheckPermission: recheckPaymentsPermission,
+  } = useTransactions(coupleId, paymentAliases);
+
+  // Either source alone is enough to detect a payment, so the onboarding gate
+  // is "at least one", not "both".
+  const paymentsListening = paymentsSmsGranted || paymentsPermitted;
+
+  /**
+   * Payments grouped into days, newest first. The rows already arrive ordered,
+   * so this only has to break the run wherever the day label changes.
+   */
+  const paymentDays = useMemo(() => {
+    const groups: { label: string; items: typeof transactions }[] = [];
+    for (const txn of transactions) {
+      const label = formatDayLabel(txn.occurred_at);
+      const last = groups[groups.length - 1];
+      if (last && last.label === label) last.items.push(txn);
+      else groups.push({ label, items: [txn] });
+    }
+    return groups;
+  }, [transactions]);
   // --- AI chat ---
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   /**
@@ -1152,14 +1275,6 @@ export default function App() {
 
   // Local feature states
   const [newNoteContent, setNewNoteContent] = useState('');
-  
-  // Finances
-  const [financeItems, setFinanceItems] = useState<FinanceItem[]>([]);
-  const [newItemName, setNewItemName] = useState('');
-  const [newAmount, setNewAmount] = useState('');
-  const [newType, setNewType] = useState<'subscription' | 'borrowing' | 'self_liability'>('borrowing');
-  const [financeDueDate, setFinanceDueDate] = useState('');
-  const [financeRenewalCycle, setFinanceRenewalCycle] = useState<'none' | 'monthly' | 'yearly'>('none');
 
   // Bucket list
   const [bucketList, setBucketList] = useState<BucketListItem[]>([]);
@@ -1197,9 +1312,9 @@ export default function App() {
 
   // Calendar states
   const [isCalendarVisible, setIsCalendarVisible] = useState(false);
-  const [calendarTarget, setCalendarTarget] = useState<'periodStartDate' | 'periodEndDate' | 'hospitalDate' | 'financeDueDate' | 'todoDate' | 'milestoneDate' | null>(null);
+  const [calendarTarget, setCalendarTarget] = useState<'periodStartDate' | 'periodEndDate' | 'hospitalDate' | 'todoDate' | 'milestoneDate' | null>(null);
 
-  const openCalendarFor = (target: 'periodStartDate' | 'periodEndDate' | 'hospitalDate' | 'financeDueDate' | 'todoDate' | 'milestoneDate') => {
+  const openCalendarFor = (target: 'periodStartDate' | 'periodEndDate' | 'hospitalDate' | 'todoDate' | 'milestoneDate') => {
     setCalendarTarget(target);
     setIsCalendarVisible(true);
   };
@@ -1208,7 +1323,6 @@ export default function App() {
     if (calendarTarget === 'periodStartDate') setPeriodStartDate(dateString);
     else if (calendarTarget === 'periodEndDate') setPeriodEndDate(dateString);
     else if (calendarTarget === 'hospitalDate') setHospitalDate(dateString);
-    else if (calendarTarget === 'financeDueDate') setFinanceDueDate(dateString);
     else if (calendarTarget === 'todoDate') setTodoDate(dateString);
     else if (calendarTarget === 'milestoneDate') setMilestoneDate(dateString);
     setIsCalendarVisible(false);
@@ -1285,9 +1399,6 @@ export default function App() {
   const [hospitalReason, setHospitalReason] = useState('');
   const [hospitalResults, setHospitalResults] = useState('');
 
-  // Finance borrowing lender direction state
-  const [financeLenderDirection, setFinanceLenderDirection] = useState<'me' | 'partner'>('me');
-
   // Configure notification permissions + channels upon login.
   useEffect(() => {
     if (session) {
@@ -1343,22 +1454,6 @@ export default function App() {
     return 'Partner';
   };
 
-  const fetchSharedFinances = async () => {
-    if (!coupleId) return;
-
-    const { data, error } = await supabase
-      .from('finances')
-      .select('*')
-      .eq('couple_id', coupleId)
-      .order('due_date', { ascending: true });
-
-    if (error) {
-      console.error('[Finances] Fetch failed:', error);
-      return;
-    }
-
-    setFinanceItems((data || []) as FinanceItem[]);
-  };
 
   const fetchSharedBucketList = async () => {
     if (!coupleId) return;
@@ -1399,13 +1494,7 @@ export default function App() {
   useEffect(() => {
     if (!coupleId) return;
 
-    fetchSharedFinances();
     fetchSharedBucketList();
-
-    const financeChannel = supabase
-      .channel(`finance-sync:${coupleId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'finances', filter: `couple_id=eq.${coupleId}` }, fetchSharedFinances)
-      .subscribe();
 
     const bucketChannel = supabase
       .channel(`bucket-sync:${coupleId}`)
@@ -1413,7 +1502,6 @@ export default function App() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(financeChannel);
       supabase.removeChannel(bucketChannel);
     };
   }, [coupleId]);
@@ -1421,34 +1509,6 @@ export default function App() {
   useEffect(() => {
     fetchHospitalVisits();
   }, [coupleId, profile?.id, partnerProfile?.id]);
-
-  useEffect(() => {
-    const scheduleFinanceReminders = () => withLock(`finance:${coupleId}`, async () => {
-      if (!coupleId) return;
-
-      await cancelScheduledNotificationsByPrefix(`finance:${coupleId}:`);
-      await Promise.all(
-        financeItems
-          .filter((item) => item.status !== 'paid')
-          .map((item) => {
-            const due = parseLocalDate(item.due_date);
-            if (isNaN(due.getTime())) return null;
-            const reminderDate = new Date(due);
-            reminderDate.setDate(reminderDate.getDate() - 1);
-            reminderDate.setHours(9, 0, 0, 0);
-
-            return scheduleSharedReminder({
-              reminderKey: `finance:${coupleId}:${item.id}`,
-              title: 'NOVIA Finance Reminder',
-              body: `${item.item_name} is due tomorrow. Amount: ₹${Number(item.amount).toFixed(2)}.`,
-              date: reminderDate,
-            });
-          })
-      );
-    });
-
-    scheduleFinanceReminders();
-  }, [financeItems, coupleId]);
 
   useEffect(() => {
     const scheduleCycleReminder = () => withLock(`period:${coupleId}`, async () => {
@@ -1760,130 +1820,13 @@ export default function App() {
     if (!success) setNewNoteContent(content);
   };
 
-  const handleAddFinance = async () => {
-    if (!coupleId || !userId) return;
-
-    // Validate explicitly and say what's wrong. The old version returned
-    // silently on bad input, so a mistyped amount looked like a dead button.
-    if (!newItemName.trim()) {
-      Alert.alert('Name required', 'Give this item a name so you both recognise it later.');
-      return;
-    }
-    const amount = parseFloat(newAmount);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      Alert.alert('Invalid amount', 'Enter an amount greater than zero.');
-      return;
-    }
-    const dueDate = parseLocalDate(financeDueDate);
-    if (!financeDueDate.trim() || isNaN(dueDate.getTime())) {
-      Alert.alert('Pick a due date', 'Choose the due or renewal date for this item.');
-      return;
-    }
-
-    const isSelfLiability = newType === 'self_liability';
-
-    // A borrowing needs a real second party; without a linked partner it can't
-    // be attributed and would sit in the ledger owed by nobody.
-    if (newType === 'borrowing' && !partnerProfile?.id) {
-      Alert.alert(
-        'No partner linked',
-        'Link your partner before logging a borrowing, so the ledger knows who owes whom.'
-      );
-      return;
-    }
-
-    const lenderId = newType === 'borrowing' ? (financeLenderDirection === 'me' ? userId : partnerProfile!.id) : null;
-    const borrowerId = newType === 'borrowing' ? (financeLenderDirection === 'me' ? partnerProfile!.id : userId) : null;
-
-    const payload = {
-      couple_id: coupleId,
-      type: isSelfLiability ? 'subscription' : newType,
-      item_name: newItemName.trim(),
-      amount,
-      due_date: toLocalISODate(dueDate),
-      // Only shared subscriptions renew. financeRenewalCycle is shared form
-      // state, so without this a cycle picked for a subscription would follow
-      // the user over to a borrowing and make it un-settleable.
-      renewal_cycle: newType === 'subscription' ? financeRenewalCycle : 'none',
-      status: 'pending',
-      is_self_liability: isSelfLiability,
-      lender_id: lenderId,
-      borrower_id: borrowerId,
-      created_by: userId,
-    };
-
-    let { error } = await supabase.from('finances').insert(payload);
-
-    // Older databases may predate the created_by column (handleAddBucket carries
-    // the same fallback). Retry without it rather than losing the entry.
-    if (error?.code === 'PGRST204' && error.message.includes('created_by')) {
-      const { created_by: _createdBy, ...fallbackPayload } = payload;
-      error = (await supabase.from('finances').insert(fallbackPayload)).error;
-    }
-
-    if (error) {
-      // The is_self_liability column ships in 20260719_finance_rework.sql. If the
-      // JS reached the device before that migration was applied, say so plainly
-      // instead of surfacing a raw PostgREST schema-cache error.
-      if (error.code === 'PGRST204' && error.message.includes('is_self_liability')) {
-        Alert.alert(
-          'Database update needed',
-          'Run the 20260719_finance_rework.sql migration in the Supabase SQL editor, then try again.'
-        );
-      } else {
-        Alert.alert('Finance not saved', error.message);
-      }
-      return;
-    }
-
-    setNewItemName('');
-    setNewAmount('');
-    setFinanceDueDate('');
-    setFinanceRenewalCycle('none');
-    await fetchSharedFinances();
-  };
 
   /**
    * Settle an item. A recurring subscription rolls forward to its next billing
    * date instead of being retired — marking Netflix "paid" used to remove it
    * from the ledger permanently, so it silently stopped being tracked.
    */
-  const markFinancePaid = async (item: FinanceItem) => {
-    const nowIso = new Date().toISOString();
 
-    if (isRecurring(item)) {
-      const rolled = nextDueDate(parseLocalDate(item.due_date), item.renewal_cycle as 'monthly' | 'yearly');
-      const { error } = await supabase
-        .from('finances')
-        .update({
-          due_date: toLocalISODate(rolled),
-          status: 'pending',
-          last_paid_at: nowIso,
-          updated_at: nowIso,
-        })
-        .eq('id', item.id);
-      if (error) Alert.alert('Could not update', error.message);
-      else {
-        Alert.alert(
-          'Marked paid',
-          `${item.item_name} rolls over to ${rolled.toLocaleDateString()}.`
-        );
-      }
-    } else {
-      const { error } = await supabase
-        .from('finances')
-        .update({ status: 'paid', last_paid_at: nowIso, updated_at: nowIso })
-        .eq('id', item.id);
-      if (error) Alert.alert('Could not update', error.message);
-    }
-
-    await fetchSharedFinances();
-  };
-
-  const removeFinance = async (id: string) => {
-    await supabase.from('finances').delete().eq('id', id);
-    await fetchSharedFinances();
-  };
 
   /**
    * Clear outstanding borrowings in one direction.
@@ -1892,42 +1835,6 @@ export default function App() {
    * owe you". An unfiltered update would let a single tap on the latter wipe
    * money owed *to* you, so the caller states whose debts are being forgiven.
    */
-  const handleFastSettleUp = async (direction: 'you-owe' | 'they-owe') => {
-    if (!coupleId || !userId) return;
-
-    const debtorId = direction === 'you-owe' ? userId : partnerProfile?.id;
-    if (!debtorId) return;
-
-    const debtorLabel =
-      direction === 'you-owe' ? 'you owe' : `${partnerProfile?.display_name || partnerName || 'your partner'} owes`;
-
-    Alert.alert(
-      'Settle Up',
-      `Mark everything ${debtorLabel} as paid? This clears those borrowings from the ledger.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Settle Up',
-          onPress: async () => {
-            const nowIso = new Date().toISOString();
-            const { error } = await supabase
-              .from('finances')
-              .update({ status: 'paid', last_paid_at: nowIso, updated_at: nowIso })
-              .eq('couple_id', coupleId)
-              .eq('type', 'borrowing')
-              .eq('status', 'pending')
-              .eq('borrower_id', debtorId);
-
-            if (error) {
-              Alert.alert('Settle Up failed', error.message);
-            } else {
-              await fetchSharedFinances();
-            }
-          }
-        }
-      ]
-    );
-  };
 
   const handleAddBucket = async () => {
     if (!coupleId || !userId || !newBucketTitle.trim()) return;
@@ -3061,6 +2968,168 @@ export default function App() {
                   </View>
                 )}
 
+                {/* Detected payments. No manual entry, no ledger, no
+                    settle-up: the old finance module asked two people to
+                    bookkeep their own relationship, and they didn't. This one
+                    only reports what already happened. */}
+                {activeTab === 'finances' && (
+                  <View style={styles.tabContent}>
+                    <View style={styles.notesHeader}>
+                      <Text style={styles.sectionHeading}>MONEY</Text>
+                      {paymentsSupported && paymentsListening ? (
+                        <PressableScale
+                          style={styles.aliasButton}
+                          scaleTo={0.9}
+                          onPress={() => {
+                            setAliasDraft(customAliases.join(', '));
+                            setAliasSheetOpen(true);
+                          }}
+                        >
+                          <Pencil size={14} color={THEME.colors.primary} strokeWidth={2.4} />
+                          <Text style={styles.aliasButtonText}>NAMES</Text>
+                        </PressableScale>
+                      ) : null}
+                    </View>
+
+                    {!paymentsSupported ? (
+                      <GlassCard style={styles.sectionCard} blur={false}>
+                        <Text style={styles.paymentTitle}>Not available here</Text>
+                        <Text style={styles.paymentCopy}>
+                          Payment detection reads Android notifications, and iOS has no
+                          equivalent to read. On Android it needs a build that carries the
+                          listener — if this phone updated over the air, install the
+                          latest APK and it will appear.
+                        </Text>
+                      </GlassCard>
+                    ) : !paymentsListening ? (
+                      <GlassCard style={styles.sectionCard} blur={false}>
+                        <View style={styles.rowBetween}>
+                          <Text style={styles.paymentTitle}>Let NOVIA see the money</Text>
+                          <BellRing size={18} color={THEME.colors.primary} />
+                        </View>
+                        <Text style={styles.paymentCopy}>
+                          Your bank texts you every transfer. NOVIA reads those texts, keeps
+                          the ones with {partnerLabel}’s name on them, and ignores
+                          everything else — no one-time codes, no conversations. A text
+                          that isn’t a payment is never even stored, and the message
+                          itself never leaves this phone: only the amount and the time do.
+                        </Text>
+                        <SubmitButton
+                          style={[styles.primaryButton, { marginTop: 16 }]}
+                          onPress={requestPaymentsSms}
+                        >
+                          <Text style={styles.primaryBtnText}>ALLOW PAYMENT TEXTS</Text>
+                        </SubmitButton>
+
+                        {/* The second path, for transfers an app announces but the
+                            bank doesn't text about. Secondary because it costs a trip
+                            into Settings, where the first is one dialog. */}
+                        <TouchableOpacity
+                          style={styles.secondaryLink}
+                          activeOpacity={0.7}
+                          onPress={() => openListenerSettings()}
+                        >
+                          <Text style={styles.secondaryLinkText}>
+                            Or watch payment apps instead
+                          </Text>
+                        </TouchableOpacity>
+                        <Text style={styles.paymentHint}>
+                          That opens Settings → Notification access. Switch NOVIA on
+                          there and come back — this screen rechecks itself.
+                        </Text>
+                      </GlassCard>
+                    ) : (
+                      <>
+                        {/* Samsung's "put unused apps to sleep" stops delivery after a
+                            few idle days and reports nothing, so the warning has to
+                            come from us. */}
+                        {!paymentsBatteryExempt ? (
+                          <TouchableOpacity
+                            style={styles.batteryWarning}
+                            activeOpacity={0.85}
+                            onPress={() => {
+                              requestIgnoreBatteryOptimizations();
+                              recheckPaymentsPermission();
+                            }}
+                          >
+                            <BatteryWarning size={17} color={THEME.colors.accent} />
+                            <Text style={styles.batteryWarningText}>
+                              Battery saving can put NOVIA to sleep and quietly stop
+                              detection. Tap to let it run unrestricted.
+                            </Text>
+                          </TouchableOpacity>
+                        ) : null}
+
+                        {paymentsLoading ? (
+                          <GlassCard style={styles.sectionCard} blur={false}>
+                            <Skeleton height={14} />
+                            <Skeleton width="62%" height={14} style={{ marginTop: 12 }} delay={110} />
+                            <Skeleton width="80%" height={14} style={{ marginTop: 12 }} delay={200} />
+                          </GlassCard>
+                        ) : transactions.length === 0 ? (
+                          <View style={styles.emptyCard}>
+                            <Text style={styles.emptyText}>Nothing detected yet.</Text>
+                            <Text style={[styles.paymentHint, { textAlign: 'center' }]}>
+                              The next payment either of you sends the other lands here on
+                              its own — nothing to add by hand.
+                            </Text>
+                          </View>
+                        ) : (
+                          paymentDays.map((day) => (
+                            <View key={day.label} style={styles.paymentDay}>
+                              <Text style={styles.paymentDayLabel}>{day.label}</Text>
+                              {day.items.map((txn) => {
+                                // Only one of the two phones' observations survives the
+                                // pairing done server-side, so a stored direction can be
+                                // the partner's point of view. Read it back as this
+                                // reader's own.
+                                const direction = directionFor(txn, userId);
+                                const sent = direction === 'sent';
+                                const app = PAYMENT_APPS[txn.source_package];
+                                return (
+                                  <View key={txn.id} style={styles.txnRow}>
+                                    <View
+                                      style={[
+                                        styles.txnIcon,
+                                        sent ? styles.txnIconSent : styles.txnIconReceived,
+                                      ]}
+                                    >
+                                      {sent ? (
+                                        <ArrowUpRight size={17} color={THEME.ink[70]} strokeWidth={2.6} />
+                                      ) : (
+                                        <ArrowDownLeft size={17} color={THEME.colors.primary} strokeWidth={2.6} />
+                                      )}
+                                    </View>
+                                    <View style={styles.txnBody}>
+                                      <Text style={styles.txnName} numberOfLines={1}>
+                                        {sent ? 'Sent to' : 'From'} {partnerLabel}
+                                      </Text>
+                                      <Text style={styles.metaLine}>
+                                        {formatClock(txn.occurred_at)}
+                                        {app ? ` · ${app}` : ''}
+                                      </Text>
+                                    </View>
+                                    <Text
+                                      style={[
+                                        styles.txnAmount,
+                                        sent ? styles.txnAmountSent : styles.txnAmountReceived,
+                                      ]}
+                                    >
+                                      {sent ? '−' : '+'}
+                                      {'₹'}
+                                      {formatAmount(txn.amount)}
+                                    </Text>
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          ))
+                        )}
+                      </>
+                    )}
+                  </View>
+                )}
+
                 {/* Shared Todo List (Hub sub-screen) */}
                 {activeTab === 'todos' && (
                   <View style={styles.tabContent}>
@@ -3407,347 +3476,6 @@ export default function App() {
                 )}
 
                 {/* Subscriptions & Borrowings Tab */}
-                {activeTab === 'finances' && (() => {
-                  // Calculate liabilities. `yourOwed` / `partnerOwed` power the
-                  // per-person liability bars (total each is on the hook for).
-                  // The inter-partner net settlement is tracked separately from
-                  // borrowings only — self-liabilities are personal and must not
-                  // leak into who-owes-whom.
-                  const partnerDisplayName = partnerProfile?.display_name || partnerName || 'Partner';
-
-                  // All ledger arithmetic lives in summarizeFinances (unit tested)
-                  // rather than being recomputed inline on every render.
-                  const summary = summarizeFinances(financeItems, userId, partnerProfile?.id);
-
-                  const {
-                    combinedOutstanding,
-                    yourShare,
-                    partnerShare,
-                    yourSelfLiability,
-                    partnerSelfLiability,
-                    netSettlement,
-                    monthlySubscriptionCost,
-                    activeSubscriptionCount,
-                    unattributed,
-                    overdueCount,
-                  } = summary;
-
-                  // Bars are proportional to what's actually attributed, so they
-                  // fill correctly even when some rows can't be assigned.
-                  const barBasis = yourShare + partnerShare;
-
-                  // Helper for generating next 30 days
-                  const getNext30Days = () => {
-                    const days = [];
-                    const today = new Date();
-                    for (let i = 0; i < 30; i++) {
-                      const current = new Date(today);
-                      current.setDate(today.getDate() + i);
-                      days.push(current);
-                    }
-                    return days;
-                  };
-
-                  return (
-                    <View style={styles.tabContent}>
-                      {/* Proportional Spend Analytics Dashboard */}
-                      <GlassCard style={styles.sectionCard} blur={false}>
-                        <Text style={styles.sectionHeading}>SPEND ANALYSIS &amp; LEDGER COMPARISON</Text>
-                        
-                        <View style={styles.analyticsCombinedRow}>
-                          <View>
-                            <Text style={styles.analyticsLabel}>TOTAL OUTSTANDING</Text>
-                            <Text style={styles.analyticsCombinedValue}>₹{combinedOutstanding.toFixed(2)}</Text>
-                          </View>
-                          {overdueCount > 0 && (
-                            <View style={styles.overduePill}>
-                              <Text style={styles.overduePillText}>
-                                {overdueCount} overdue
-                              </Text>
-                            </View>
-                          )}
-                        </View>
-
-                        {/* Progress Bar 1 - You Owe */}
-                        <View style={styles.progressGroup}>
-                          <View style={styles.rowBetween}>
-                            <Text style={styles.progressLabel}>YOUR TOTAL EXPOSURE</Text>
-                            <Text style={styles.progressValue}>₹{yourShare.toFixed(2)}</Text>
-                          </View>
-                          <AnimatedBar
-                            progress={barBasis > 0 ? yourShare / barBasis : 0}
-                            color={THEME.colors.primary}
-                          />
-                          {yourSelfLiability > 0 && (
-                            <Text style={styles.progressSubLabel}>
-                              includes ₹{yourSelfLiability.toFixed(2)} personal
-                            </Text>
-                          )}
-                        </View>
-
-                        {/* Progress Bar 2 - Partner Owes */}
-                        <View style={styles.progressGroup}>
-                          <View style={styles.rowBetween}>
-                            <Text style={styles.progressLabel}>{partnerDisplayName.toUpperCase()}'S TOTAL EXPOSURE</Text>
-                            <Text style={styles.progressValue}>₹{partnerShare.toFixed(2)}</Text>
-                          </View>
-                          <AnimatedBar
-                            progress={barBasis > 0 ? partnerShare / barBasis : 0}
-                            color={THEME.colors.accent}
-                          />
-                          {partnerSelfLiability > 0 && (
-                            <Text style={styles.progressSubLabel}>
-                              includes ₹{partnerSelfLiability.toFixed(2)} personal
-                            </Text>
-                          )}
-                        </View>
-
-                        {unattributed > 0 && (
-                          <Text style={styles.ledgerWarning}>
-                            ₹{unattributed.toFixed(2)} of borrowings couldn't be matched to either of you —
-                            they were likely logged before your accounts were linked. Remove and re-add them
-                            to include them in the settlement.
-                          </Text>
-                        )}
-                      </GlassCard>
-
-                      {/* Net Settlement Ledger Card */}
-                      {(() => {
-                        // Net settlement is strictly between partners — only
-                        // borrowings count (subscriptions cancel 50/50, self-
-                        // liabilities are personal and excluded entirely).
-                        const owedToYou = netSettlement > 0;
-                        const accent = owedToYou ? THEME.colors.success : THEME.colors.rust;
-                        return (
-                          <View style={[styles.settlementCard, netSettlement !== 0 && { backgroundColor: owedToYou ? THEME.glass.success : THEME.glass.danger }]}>
-                            <Text style={[styles.sectionHeading, { color: netSettlement === 0 ? THEME.colors.textMuted : accent }]}>NET SETTLEMENT LEDGER</Text>
-                            {netSettlement !== 0 ? (
-                              <View>
-                                <Text style={[styles.predText, { fontSize: 13, marginBottom: 12 }]}>
-                                  {owedToYou ? (
-                                    <>Overall, <Text style={{ color: accent, fontFamily: FONTS.bold }}>{partnerDisplayName}</Text> owes you </>
-                                  ) : (
-                                    <>Overall, you owe <Text style={{ color: accent, fontFamily: FONTS.bold }}>{partnerDisplayName}</Text> </>
-                                  )}
-                                  <Text style={{ color: accent, fontFamily: FONTS.bold, fontSize: 15 }}>₹{Math.abs(netSettlement).toFixed(2)}</Text> net.
-                                </Text>
-                                <TouchableOpacity
-                                  style={styles.primaryButton}
-                                  onPress={() => handleFastSettleUp(owedToYou ? 'they-owe' : 'you-owe')}
-                                >
-                                  <Text style={styles.primaryBtnText}>
-                                    {owedToYou ? `Mark ${partnerDisplayName} settled` : 'Settle Up'}
-                                  </Text>
-                                </TouchableOpacity>
-                              </View>
-                            ) : (
-                              <Text style={[styles.predText, { fontSize: 13, color: THEME.colors.textMuted, textAlign: 'center', marginVertical: 6 }]}>
-                                Balances are perfectly settled. No outstanding debts.
-                              </Text>
-                            )}
-                          </View>
-                        );
-                      })()}
-
-                      {/* Subscription Forecast Card */}
-                      {activeSubscriptionCount > 0 && (
-                        <GlassCard style={styles.subscriptionForecastCard} blur={false}>
-                          <Text style={styles.sectionHeading}>RECURRING SUBSCRIPTION FORECAST</Text>
-                          <Text style={[styles.predText, { fontSize: 13, marginBottom: 8 }]}>
-                            Tracked Subscriptions: <Text style={{ color: THEME.colors.primary, fontFamily: FONTS.bold }}>{activeSubscriptionCount}</Text>
-                          </Text>
-                          <View style={[styles.rowBetween, { marginTop: 12, paddingTop: 12 }]}>
-                            <Text style={styles.progressLabel}>TOTAL MONTHLY BURDEN</Text>
-                            <Text style={[styles.financeAmount, { color: THEME.colors.warning }]}>₹{monthlySubscriptionCost.toFixed(2)}/mo</Text>
-                          </View>
-                          <View style={[styles.rowBetween, { marginTop: 4 }]}>
-                            <Text style={styles.progressLabel}>INDIVIDUAL BURDEN (50% SPLIT)</Text>
-                            <Text style={[styles.financeMeta, { fontSize: 11 }]}>₹{(monthlySubscriptionCost / 2).toFixed(2)}/mo each</Text>
-                          </View>
-                          <Text style={styles.progressSubLabel}>
-                            Yearly plans are shown as their monthly equivalent.
-                          </Text>
-                        </GlassCard>
-                      )}
-
-                      <GlassCard style={styles.sectionCard} blur={false}>
-                        <Text style={styles.sectionHeading}>LOG BORROWINGS &amp; SUBSCRIPTIONS</Text>
-                        <TextInput
-                          style={styles.input}
-                          placeholder="Item or Subscription Name..."
-                          placeholderTextColor={THEME.ink[35]}
-                          value={newItemName}
-                          onChangeText={setNewItemName}
-                        />
-                        <TextInput
-                          style={styles.input}
-                          placeholder="Amount (₹)..."
-                          placeholderTextColor={THEME.ink[35]}
-                          keyboardType="numeric"
-                          value={newAmount}
-                          onChangeText={setNewAmount}
-                        />
-                        
-                        {/* Horizontal Date Selector Strip instead of text input */}
-                        <Text style={styles.inputLabel}>SELECT DUE OR RENEWAL DATE</Text>
-                        <ScrollView 
-                          horizontal 
-                          showsHorizontalScrollIndicator={false} 
-                          style={styles.dateStrip}
-                          contentContainerStyle={{ gap: 8, paddingBottom: 10 }}
-                        >
-                          {getNext30Days().map((dateObj) => {
-                            // Local formatting: toISOString() would shift this to
-                            // the previous calendar day anywhere east of UTC.
-                            const dateStr = toLocalISODate(dateObj);
-                            const isSelected = financeDueDate === dateStr;
-                            const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
-                            const dayNum = dateObj.getDate();
-                            const monthName = dateObj.toLocaleDateString('en-US', { month: 'short' });
-                            
-                            return (
-                              <TouchableOpacity
-                                key={dateStr}
-                                style={[styles.dateCard, isSelected && styles.activeDateCard]}
-                                onPress={() => setFinanceDueDate(dateStr)}
-                              >
-                                <Text style={[styles.dateCardDay, isSelected && styles.activeDateCardText]}>{dayName.toUpperCase()}</Text>
-                                <Text style={[styles.dateCardNum, isSelected && styles.activeDateCardText]}>{dayNum}</Text>
-                                <Text style={[styles.dateCardMonth, isSelected && styles.activeDateCardText]}>{monthName}</Text>
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </ScrollView>
-
-                        <TouchableOpacity 
-                          style={[styles.calendarPickerBtn, { marginTop: 4 }]} 
-                          onPress={() => openCalendarFor('financeDueDate')}
-                        >
-                          <Text style={styles.calendarPickerBtnText}>
-                            {financeDueDate ? `DUE DATE: ${financeDueDate}` : 'OR CHOOSE CUSTOM DUE DATE FROM CALENDAR'}
-                          </Text>
-                        </TouchableOpacity>
-
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12, gap: 8 }}>
-                          <TouchableOpacity 
-                            style={[styles.smallBtn, { flex: 1 }, newType === 'borrowing' && { backgroundColor: THEME.glass.accentStrong, ...THEME.shadow.glowAccent }]}
-                            onPress={() => setNewType('borrowing')}
-                          >
-                            <Text style={styles.btnText}>Borrowing</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity 
-                            style={[styles.smallBtn, { flex: 1 }, newType === 'subscription' && { backgroundColor: THEME.glass.accentStrong, ...THEME.shadow.glowAccent }]}
-                            onPress={() => setNewType('subscription')}
-                          >
-                            <Text style={styles.btnText}>Subscription</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity 
-                            style={[styles.smallBtn, { flex: 1 }, newType === 'self_liability' && { backgroundColor: alpha(THEME.colors.warning, 0.20), shadowColor: THEME.colors.warning, shadowOpacity: 0.5, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 8 }]}
-                            onPress={() => setNewType('self_liability')}
-                          >
-                            <Text style={[styles.btnText, newType === 'self_liability' && { color: THEME.colors.warning, fontFamily: FONTS.bold }]}>Self Liability</Text>
-                          </TouchableOpacity>
-                        </View>
-
-                        {newType === 'borrowing' && (
-                          <View style={{ marginBottom: 12 }}>
-                            <Text style={styles.inputLabel}>LENDER DIRECTION (WHO OWE WHO?)</Text>
-                            <View style={styles.rowBetween}>
-                              <TouchableOpacity 
-                                style={[styles.smallBtn, financeLenderDirection === 'me' && { backgroundColor: THEME.glass.accentStrong, ...THEME.shadow.glowAccent }, { flex: 1, marginRight: 6 }]}
-                                onPress={() => setFinanceLenderDirection('me')}
-                              >
-                                <Text style={styles.btnText}>You lent to {partnerDisplayName}</Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity 
-                                style={[styles.smallBtn, financeLenderDirection === 'partner' && { backgroundColor: THEME.glass.accentStrong, ...THEME.shadow.glowAccent }, { flex: 1, marginLeft: 6 }]}
-                                onPress={() => setFinanceLenderDirection('partner')}
-                              >
-                                <Text style={styles.btnText}>{partnerDisplayName} lent to You</Text>
-                              </TouchableOpacity>
-                            </View>
-                          </View>
-                        )}
-
-                        {newType === 'subscription' && (
-                          <View style={styles.segmentControl}>
-                            {(['none', 'monthly', 'yearly'] as const).map((cycle) => (
-                              <TouchableOpacity
-                                key={cycle}
-                                style={[styles.segmentOption, financeRenewalCycle === cycle && styles.activeSegmentOption]}
-                                onPress={() => setFinanceRenewalCycle(cycle)}
-                              >
-                                <Text style={[styles.segmentText, financeRenewalCycle === cycle && styles.activeSegmentText]}>
-                                  {cycle.toUpperCase()}
-                                </Text>
-                              </TouchableOpacity>
-                            ))}
-                          </View>
-                        )}
-                        <SubmitButton style={styles.primaryButton} onPress={handleAddFinance}>
-                          <Text style={styles.primaryBtnText}>Log Financial Item</Text>
-                        </SubmitButton>
-                      </GlassCard>
-
-                      <Text style={styles.sectionTitle}>Shared Finance Ledger</Text>
-                      {financeItems.length === 0 ? (
-                        <Text style={styles.mutedText}>No shared finance items recorded.</Text>
-                      ) : (
-                        financeItems.map((item) => {
-                          const isSelf = !!item.is_self_liability;
-                          const overdue = isOverdue(item);
-                          const recurring = isRecurring(item);
-
-                          // Who this row belongs to, in plain language.
-                          const attribution = isSelf
-                            ? `Personal · ${getCreatorName(item.created_by)}`
-                            : item.type === 'borrowing'
-                              ? item.borrower_id === userId
-                                ? `You owe ${partnerDisplayName}`
-                                : item.borrower_id === partnerProfile?.id
-                                  ? `${partnerDisplayName} owes you`
-                                  : 'Unmatched borrowing'
-                              : 'Shared · split 50/50';
-
-                          return (
-                            <View
-                              key={item.id}
-                              style={[
-                                styles.financeCard,
-                                isSelf && styles.financeCardPersonal,
-                                overdue && styles.financeCardOverdue,
-                              ]}
-                            >
-                              <View style={{ flex: 1, paddingRight: 8 }}>
-                                <Text style={styles.financeName}>{item.item_name}</Text>
-                                <Text style={styles.financeMeta}>{attribution}</Text>
-                                <Text style={[styles.financeMeta, overdue && { color: THEME.colors.danger }]}>
-                                  {overdue ? 'Overdue since ' : 'Due '}
-                                  {parseLocalDate(item.due_date).toLocaleDateString()}
-                                  {recurring ? ` · renews ${item.renewal_cycle}` : ''}
-                                  {item.status === 'paid' ? ' · PAID' : ''}
-                                </Text>
-                              </View>
-                              <View style={styles.financeActions}>
-                                <Text style={styles.financeAmount}>₹{Number(item.amount).toFixed(2)}</Text>
-                                {item.status !== 'paid' && (
-                                  <TouchableOpacity style={styles.miniActionButton} onPress={() => markFinancePaid(item)}>
-                                    {/* Recurring items roll to the next cycle rather than retiring. */}
-                                    <Text style={styles.btnText}>{recurring ? 'Renew' : 'Paid'}</Text>
-                                  </TouchableOpacity>
-                                )}
-                                <TouchableOpacity style={styles.miniDangerButton} onPress={() => removeFinance(item.id)}>
-                                  <Text style={styles.btnText}>Remove</Text>
-                                </TouchableOpacity>
-                              </View>
-                            </View>
-                          );
-                        })
-                      )}
-                    </View>
-                  );
-                })()}
-
                 {/* Periods & Health Tab */}
                 {activeTab === 'health' && (
                   <View style={styles.tabContent}>
@@ -3860,7 +3588,7 @@ export default function App() {
                       >
                         <View style={{ flex: 1, marginRight: 10 }}>
                           <Text style={styles.vaultText}>{getCreatorName(log.user_id)}: {log.value_json?.reason || 'Hospital visit'}</Text>
-                          <Text style={styles.financeMeta} numberOfLines={1}>{log.value_json?.test_results || 'No test results added.'}</Text>
+                          <Text style={styles.metaLine} numberOfLines={1}>{log.value_json?.test_results || 'No test results added.'}</Text>
                         </View>
                         <View style={{ alignItems: 'flex-end' }}>
                           <Text style={styles.vaultDate}>{new Date(log.record_date).toLocaleDateString()}</Text>
@@ -4015,6 +3743,46 @@ export default function App() {
                 </TouchableOpacity>
               </GlassCard>
             </TouchableOpacity>
+          </Modal>
+
+          {/* The names to match payments against. Its own sheet rather than a
+              settings row because it is the one thing that can make detection
+              silently miss everything, and it belongs next to the feed that
+              would look empty if it were wrong. */}
+          <Modal visible={aliasSheetOpen} transparent animationType="slide" onRequestClose={() => setAliasSheetOpen(false)}>
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              style={styles.settingsModalOverlay}
+            >
+              <GlassCard style={styles.settingsModalContent} tier="chrome" radius={24}>
+                <View style={styles.settingsHeader}>
+                  <Text style={styles.settingsTitle}>MATCH NAMES</Text>
+                  <TouchableOpacity onPress={() => setAliasSheetOpen(false)} hitSlop={PRESS_HIT_SLOP}>
+                    <X size={22} color={THEME.colors.text} />
+                  </TouchableOpacity>
+                </View>
+
+                <Text style={styles.paymentCopy}>
+                  Payments are matched against {partnerLabel} already. Add any other
+                  spelling your payment app shows — a bank’s version of the name, a
+                  maiden name, an initial. Separate them with commas.
+                </Text>
+
+                <TextInput
+                  style={[styles.input, { marginTop: 14 }]}
+                  placeholder="Gayathri Udhayan, G Udhayan"
+                  placeholderTextColor={THEME.ink[35]}
+                  value={aliasDraft}
+                  onChangeText={setAliasDraft}
+                  autoCapitalize="words"
+                  autoCorrect={false}
+                />
+
+                <SubmitButton style={[styles.primaryButton, { marginTop: 14 }]} onPress={saveAliases}>
+                  <Text style={styles.primaryBtnText}>SAVE</Text>
+                </SubmitButton>
+              </GlassCard>
+            </KeyboardAvoidingView>
           </Modal>
 
           {/* Ideas sheet. Lives here rather than in its own tab because its
@@ -5012,38 +4780,6 @@ const styles = StyleSheet.create({
     color: THEME.colors.textFaint,
   },
 
-  // --- Finance ledger ---
-  overduePill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: THEME.borderRadius.round,
-    backgroundColor: THEME.glass.danger,
-  },
-  overduePillText: {
-    color: THEME.colors.danger,
-    fontSize: 11,
-    fontFamily: FONTS.bold,
-  },
-  progressSubLabel: {
-    fontFamily: FONTS.body,
-    color: THEME.colors.textFaint,
-    fontSize: 10,
-    marginTop: 4,
-  },
-  ledgerWarning: {
-    fontFamily: FONTS.body,
-    color: THEME.colors.warning,
-    fontSize: 11,
-    lineHeight: 16,
-    marginTop: 12,
-  },
-  financeCardPersonal: {
-    backgroundColor: THEME.glass.moss,
-  },
-  financeCardOverdue: {
-    backgroundColor: THEME.glass.danger,
-  },
-
   // --- OTA "update ready" banner ---
   otaBanner: {
     position: 'absolute',
@@ -5586,30 +5322,6 @@ const styles = StyleSheet.create({
     fontSize: 32,
     fontFamily: FONTS.heavy,
   },
-  segmentControl: {
-    flexDirection: 'row',
-    backgroundColor: THEME.glass.inset,
-    borderRadius: THEME.borderRadius.sm,
-    padding: 5,
-    marginBottom: THEME.spacing.sm,
-  },
-  segmentOption: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: THEME.borderRadius.sm,
-  },
-  activeSegmentOption: {
-    backgroundColor: alpha(THEME.colors.primary, 0.12),
-  },
-  segmentText: {
-    color: THEME.ink[50],
-    fontSize: 11,
-    fontFamily: FONTS.heavy,
-  },
-  activeSegmentText: {
-    color: THEME.colors.primary,
-  },
   emptyCard: {
     backgroundColor: alpha(THEME.ink[95], 0.035),
     padding: THEME.spacing.lg,
@@ -5633,61 +5345,135 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: FONTS.bold,
   },
-  btnText: {
-    color: THEME.ink[95],
-    fontSize: 13,
-    fontFamily: FONTS.bold,
-  },
-  smallBtn: {
-    flex: 1,
-    marginHorizontal: 3,
-    paddingVertical: 12,
-    borderRadius: THEME.borderRadius.sm,
-    alignItems: 'center',
-    backgroundColor: THEME.glass.surface,
-    marginBottom: THEME.spacing.sm,
-    ...THEME.shadow.soft,
-  },
-  financeCard: {
-    ...THEME.material.regular,
-    padding: THEME.spacing.md,
-    borderRadius: THEME.borderRadius.md,
+  // --- Detected payments ---
+  //
+  // Direction is carried by intensity, not by hue: money in is the accent,
+  // money out is neutral ink. Under a single-accent palette there is no green
+  // and red to reach for, and this reads correctly in greyscale anyway — which
+  // the five-hue version never did.
+  aliasButton: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: THEME.borderRadius.round,
+    backgroundColor: alpha(THEME.colors.primary, 0.12),
+  },
+  aliasButtonText: {
+    color: THEME.colors.primary,
+    fontFamily: FONTS.heavy,
+    fontSize: 10,
+    letterSpacing: 1.2,
+  },
+  secondaryLink: {
+    alignSelf: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    marginTop: 4,
+  },
+  secondaryLinkText: {
+    color: THEME.colors.primary,
+    fontSize: 13,
+    fontFamily: FONTS.semibold,
+  },
+  paymentTitle: {
+    color: THEME.ink[95],
+    fontSize: 17,
+    fontFamily: FONTS.bold,
+    flexShrink: 1,
+    marginBottom: 10,
+  },
+  paymentCopy: {
+    color: THEME.ink[70],
+    fontSize: 13,
+    lineHeight: 19,
+    fontFamily: FONTS.body,
+  },
+  paymentHint: {
+    color: THEME.colors.textFaint,
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: FONTS.body,
+    marginTop: 12,
+  },
+  batteryWarning: {
+    ...THEME.material.thin,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 14,
+    borderRadius: THEME.borderRadius.sm,
+    borderColor: alpha(THEME.colors.accent, 0.35),
+    marginBottom: THEME.spacing.md,
+  },
+  batteryWarningText: {
+    flex: 1,
+    color: THEME.ink[70],
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: FONTS.body,
+  },
+  paymentDay: {
+    marginBottom: THEME.spacing.md,
+  },
+  paymentDayLabel: {
+    color: THEME.colors.textFaint,
+    fontSize: 11,
+    fontFamily: FONTS.heavy,
+    letterSpacing: 1.3,
+    textTransform: 'uppercase',
+    marginBottom: THEME.spacing.sm,
+    paddingHorizontal: THEME.spacing.xs,
+  },
+  txnRow: {
+    ...THEME.material.regular,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    borderRadius: THEME.borderRadius.sm,
     marginBottom: THEME.spacing.sm,
   },
-  financeName: {
-    fontSize: 15,
-    color: THEME.ink[95],
-    fontFamily: FONTS.bold,
+  txnIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: THEME.borderRadius.round,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  financeMeta: {
+  txnIconSent: {
+    backgroundColor: alpha(THEME.ink[95], 0.07),
+  },
+  txnIconReceived: {
+    backgroundColor: alpha(THEME.colors.primary, 0.16),
+  },
+  txnBody: {
+    flex: 1,
+  },
+  txnName: {
+    color: THEME.ink[95],
+    fontSize: 15,
+    fontFamily: FONTS.semibold,
+  },
+  txnAmount: {
+    fontSize: 16,
+    fontFamily: FONTS.heavy,
+    // Amounts stack down a column and have to line up; proportional digits
+    // make the decimal points wander.
+    fontVariant: ['tabular-nums'],
+  },
+  txnAmountSent: {
+    color: THEME.ink[70],
+  },
+  txnAmountReceived: {
+    color: THEME.colors.primary,
+  },
+  metaLine: {
     fontFamily: FONTS.body,
     fontSize: 11,
     color: THEME.ink[50],
     marginTop: 2,
-  },
-  financeAmount: {
-    fontSize: 16,
-    fontFamily: FONTS.displayBold,
-    color: THEME.colors.primary,
-  },
-  financeActions: {
-    alignItems: 'flex-end',
-    gap: 6,
-  },
-  miniActionButton: {
-    backgroundColor: THEME.glass.accentStrong,
-    borderRadius: THEME.borderRadius.sm,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  miniDangerButton: {
-    backgroundColor: THEME.glass.danger,
-    borderRadius: THEME.borderRadius.sm,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
   },
   predText: {
     color: THEME.colors.primary,
@@ -5931,41 +5717,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  analyticsCombinedRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: THEME.spacing.md,
-    backgroundColor: THEME.glass.accent,
-    padding: THEME.spacing.md,
-    borderRadius: THEME.borderRadius.md,
-  },
-  analyticsLabel: {
-    fontSize: 10,
-    fontFamily: FONTS.heavy,
-    color: THEME.ink[50],
-    letterSpacing: 1.5,
-  },
-  analyticsCombinedValue: {
-    fontSize: 28,
-    fontFamily: FONTS.displayBold,
-    color: THEME.colors.primary,
-    marginTop: 4,
-  },
-  progressGroup: {
-    marginBottom: THEME.spacing.sm,
-  },
-  progressLabel: {
-    fontSize: 10,
-    fontFamily: FONTS.heavy,
-    color: THEME.ink[95],
-    letterSpacing: 1,
-  },
-  progressValue: {
-    fontSize: 12,
-    fontFamily: FONTS.displayBold,
-    color: THEME.colors.primary,
-  },
   progressBarBg: {
     height: 8,
     backgroundColor: alpha(THEME.ink[95], 0.12),
@@ -5976,45 +5727,6 @@ const styles = StyleSheet.create({
   progressBarFill: {
     height: '100%',
     borderRadius: 4,
-  },
-  dateStrip: {
-    flexDirection: 'row',
-    marginVertical: THEME.spacing.xs,
-  },
-  dateCard: {
-    width: 58,
-    height: 72,
-    borderRadius: THEME.borderRadius.md,
-    backgroundColor: THEME.glass.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: THEME.spacing.xs,
-    ...THEME.shadow.soft,
-  },
-  activeDateCard: {
-    backgroundColor: THEME.colors.primary,
-    ...THEME.shadow.glowAccent,
-  },
-  dateCardDay: {
-    fontSize: 9,
-    fontFamily: FONTS.heavy,
-    color: THEME.ink[70],
-    letterSpacing: 1,
-  },
-  activeDateCardText: {
-    color: THEME.ink[95],
-    fontFamily: FONTS.heavy,
-  },
-  dateCardNum: {
-    fontSize: 18,
-    fontFamily: FONTS.heavy,
-    color: THEME.ink[95],
-  },
-  dateCardMonth: {
-    fontSize: 9,
-    fontFamily: FONTS.heavy,
-    color: THEME.ink[70],
-    letterSpacing: 1,
   },
   chipsRow: {
     flexDirection: 'row',
@@ -6196,18 +5908,6 @@ const styles = StyleSheet.create({
     color: THEME.ink[100],
     fontSize: 12,
     lineHeight: 18,
-  },
-  settlementCard: {
-    ...THEME.material.regular,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-  },
-  subscriptionForecastCard: {
-    ...THEME.material.regular,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
   },
   drawerBackdrop: {
     position: 'absolute',

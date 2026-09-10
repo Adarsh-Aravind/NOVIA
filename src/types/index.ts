@@ -115,23 +115,32 @@ export interface SharedNote {
 }
 
 
-export interface FinanceItem {
+/**
+ * One payment observed by the notification listener.
+ *
+ * Only parsed fields are stored — never the raw notification text, which is
+ * sensitive and would be replicated to Supabase verbatim.
+ *
+ * Both phones see the same payment from opposite sides ("you paid X" on one,
+ * "received from Y" on the other), so `dedup_key` is derived from the amount
+ * and a minute bucket and carries a couple-unique constraint. Whichever device
+ * inserts first wins; the other's insert is swallowed as a conflict.
+ */
+export interface Transaction {
   id: string;
   couple_id: string;
-  type: 'subscription' | 'borrowing';
-  item_name: string;
+  /** The device that observed it — not necessarily the payer. */
+  user_id: string;
+  /** Relative to the observing device's owner. */
+  direction: 'sent' | 'received';
   amount: number;
-  lender_id: string | null;
-  borrower_id: string | null;
-  due_date: string;
-  renewal_cycle: 'monthly' | 'yearly' | 'none';
-  status: 'pending' | 'paid' | 'overdue';
-  /** Personal debt — owned by created_by, excluded from shared/settlement math. */
-  is_self_liability: boolean;
-  last_paid_at: string | null;
-  created_by: string | null;
+  /** The other party's name as the payment app rendered it. */
+  counterparty: string;
+  /** Android package that posted the notification, e.g. Google Pay. */
+  source_package: string;
+  occurred_at: string;
+  dedup_key: string;
   created_at: string;
-  updated_at: string;
 }
 
 export interface PeriodRecord {

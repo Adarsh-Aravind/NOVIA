@@ -7,7 +7,7 @@
     "icon": "./assets/novia-icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "runtimeVersion": "1",
+    "runtimeVersion": "2",
     "updates": {
       "url": "https://u.expo.dev/928a233f-606a-412b-9b2a-6c9e57eba586",
       "checkAutomatically": "ON_LOAD",
@@ -42,7 +42,10 @@
       "permissions": [
         "android.permission.VIBRATE",
         "android.permission.POST_NOTIFICATIONS",
-        "android.permission.health.READ_STEPS"
+        "android.permission.health.READ_STEPS",
+        "android.permission.RECEIVE_SMS",
+        "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE",
+        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
       ]
     },
     "extra": {
