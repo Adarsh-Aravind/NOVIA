@@ -2,98 +2,120 @@
 
 <p align="center">
   <a href="https://github.com/Adarsh-Aravind/NOVIA">
-    <img src="https://readme-typing-svg.herokuapp.com?font=Inter&weight=400&size=24&pause=1000&color=333333&center=true&vCenter=true&width=500&lines=The+Ultimate+App+for+Couples;Stay+Connected;Track+Milestones;Grow+Together" alt="Typing SVG" />
+    <img src="https://readme-typing-svg.herokuapp.com?font=Inter&weight=400&size=24&pause=1000&color=FF6A00&center=true&vCenter=true&width=500&lines=The+Ultimate+App+for+Couples;Stay+Connected;Track+Milestones;Grow+Together" alt="Typing SVG" />
   </a>
 </p>
 
-NOVIA (Noviris) is a comprehensive React Native application engineered to help couples maintain connection, organization, and healthy engagement on a daily basis.
+NOVIA (Noviris) is a React Native application built for two people — a shared surface for staying connected, organised and a little bit competitive.
 
 ## System Architecture
 
-NOVIA leverages a modern mobile stack tailored for cross-platform availability and real-time synchronization:
+- **Frontend:** React Native 0.81 on Expo SDK 54, New Architecture enabled.
+- **Backend:** Supabase — PostgreSQL for relational data, Row Level Security for access control, and Realtime for cross-device sync.
+- **Deployment:** EAS builds the native binaries; JavaScript-only changes ship over the air without a reinstall.
 
-- **Frontend:** React Native running on the Expo framework, ensuring seamless cross-platform consistency across iOS and Android.
-- **Backend:** Supabase infrastructure providing PostgreSQL for relational data, Realtime for instant state synchronization across clients, and Auth for secure access management.
-- **Deployment:** Expo Application Services (EAS) handles both native builds (APK/IPA) and over-the-air (OTA) updates, bypassing standard store review processes for javascript-level logic changes.
+**Platform note:** the app runs on both platforms, but the Step Duel depends on Health Connect, which is Android-only. On iOS that card degrades to an "unavailable" state and everything else works. Native modules are loaded through guarded `require`s specifically so a build that lacks them fails soft instead of white-screening.
 
 ## Core Features
 
-- **Relationship Milestones:** A specialized tracking system for anniversaries and custom dates. Integrated directly with the native notification scheduler to provide timely push alerts.
-- **Daily Check-ins & Analytics:** Allows daily sentiment sharing between partners. Data is aggregated to display engagement streaks and historical relationship health metrics.
-- **Complaint Threads:** A structured, real-time communication channel dedicated to voicing and resolving disagreements constructively.
-- **Shared Task Management:** A synchronized Todo system featuring a custom time picker and real-time push notifications upon task completion or updates.
-- **Finance & Expense Tracking:** A comprehensive module designed for dual-party expense tracking, facilitating seamless management of shared financial resources.
-- **Cycle Tracking:** Integrates predictive period and ovulation modeling using localized, custom cycle mathematics.
-- **Vocabulary Builder:** Curated educational content designed to expand vocabulary, synchronized daily.
+- **Step Duel** — a daily step competition sourced from Health Connect, with a seven-day comparison graph, a quarterly season tally, win streaks, and a shared forfeit the season's loser owes.
+- **Relationship Milestones** — anniversaries and one-off dates, with day-of and day-before local notifications on both devices.
+- **Daily Check-ins** — a shared mood and gratitude log with streaks visible to both partners.
+- **Complaint Threads** — a structured, realtime channel for working through disagreements.
+- **Shared Notes** — a realtime note grid with emoji reactions and a live typing indicator.
+- **Shared Tasks** — a synchronised todo list with recurrence and reminders on both phones.
+- **Finance Tracking** — dual-party expense tracking for subscriptions and borrowings.
+- **Cycle Tracking** — predictive period and ovulation modelling with phase-aware guidance.
+- **Vocabulary Builder** — a word a day, delivered by notification.
+
+## Design System
+
+The visual language lives in [`src/constants/theme.ts`](src/constants/theme.ts) and [`src/constants/motion.ts`](src/constants/motion.ts). Both are documented inline; the short version:
+
+**One accent, on black.** Neon orange `#FF6A00` is the only chromatic colour in the app — everything else is a warm neutral drawn from the eight-step `INK` ramp. The discipline is the point: orange always means "this is the thing that matters".
+
+The consequence to design around is that **hue can no longer carry meaning**. Success, warning and danger are not green/amber/red. States are separated by *intensity* instead, backed by icons and explicit wording wherever the distinction matters. Intensity also survives greyscale and colour-vision deficiency, which a five-hue scale does not.
+
+**Materials are dark scrims, not light tints.** `THEME.material.*` composes fill, rim and graded shadow into one spread across four tiers (`thin` / `regular` / `thick` / `chrome`, plus `well` for carved surfaces). They *dim* what sits behind them rather than lightening it — a light tint over the backdrop's orange corner burn turns the card orange and drops accent text to 1.92:1.
+
+**Motion is springs, not durations.** `SPRING.*` encodes Apple's two-parameter model (damping ratio + response) converted to React Native's `stiffness`/`damping`/`mass`. Springs animate from wherever a value currently *is*, so they can be re-targeted mid-flight; a fixed-duration curve restarts from the head of its easing and visibly stutters. Bounce is reserved for motion a gesture actually threw.
+
+Reduced motion is honoured throughout via [`useReducedMotion`](src/hooks/useReducedMotion.ts).
 
 ## Project Structure
 
-The codebase is modularized within the `src` directory to maintain scalability and separation of concerns:
-
 ```text
+App.tsx               # every screen and the StyleSheet — the app is one component tree
+index.ts              # registerRootComponent
+schema.sql            # full database: tables, RLS policies, RPCs, realtime publication
+supabase/migrations/  # incremental migrations to run against an existing project
+plugins/              # local Expo config plugins (Health Connect permission delegate)
 src/
-├── components/   # Reusable, stateless UI components
-├── constants/    # Theme definitions, global configuration, and string constants
-├── hooks/        # Custom React hooks (e.g., Supabase data fetching, auth state)
-├── services/     # External integrations (e.g., Push Notifications, OTA Updates)
-├── types/        # TypeScript interface definitions and global types
-├── utils/        # Pure helper functions (e.g., cycle math, async locks)
-└── views/        # Top-level screen components representing individual application routes
+├── components/common/  # Skeleton, HubSkeleton, GlassCard, StepGraph
+├── constants/          # theme (colour, material, type), motion, vocabulary
+├── hooks/              # Supabase data + auth hooks, one per feature
+├── services/           # notifications, OTA updates, encrypted session storage
+├── types/              # database row shapes
+└── utils/              # pure helpers — cycle, finance and milestone maths
 ```
 
 ## Local Development
 
 ### Prerequisites
 
-- Node.js (v18+)
-- npm or yarn
-- Expo CLI
-- A configured Supabase Project
+- Node.js 18+
+- A configured Supabase project
+- An EAS account (`npx eas-cli login`)
 
-### Installation
+### Setup
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/Adarsh-Aravind/NOVIA.git
-   cd NOVIA
-   ```
+```bash
+git clone https://github.com/Adarsh-Aravind/NOVIA.git
+cd NOVIA
+npm install
+cp .env.example .env      # then fill in your Supabase URL + publishable key
+cp eas.example.json eas.json
+```
 
-2. **Install dependencies:**
-   ```bash
-   npm install
-   ```
+Use the **publishable** (or legacy `anon`) key — never the `service_role` key, which bypasses Row Level Security and would give anyone holding the APK full access to the database.
 
-3. **Configure Environment Variables:**
-   For local development, create a `.env` file based on the provided example template:
-   ```bash
-   cp .env.example .env
-   ```
-   For build configurations, duplicate the EAS configuration template and populate it with your Supabase credentials:
-   ```bash
-   cp eas.example.json eas.json
-   ```
+### Database
 
-4. **Start the development server:**
-   ```bash
-   npm start
-   ```
-   You can then run the application using Expo Go or a locally booted emulator (`a` for Android, `i` for iOS).
+Run [`schema.sql`](schema.sql) against a fresh project, or apply the files in `supabase/migrations/` to an existing one.
+
+**Don't skip the realtime publication.** Every `postgres_changes` subscription requires its table to be a member of `supabase_realtime`. Without membership the client subscribes *successfully* and then receives nothing — a dead feed that is indistinguishable from a working one. `schema.sql` publishes every subscribed table; `supabase/migrations/20260910_step_realtime.sql` repairs an existing project.
+
+### Running it
+
+Expo Go will not work — the app links native modules it doesn't ship. You need a development build:
+
+```bash
+npx eas-cli build --platform android --profile development
+adb install -r <the downloaded apk>
+adb reverse tcp:8081 tcp:8081        # so the device can reach Metro over USB
+npx expo start --dev-client
+```
+
+The dev build shares its package name with production, so it replaces the release app on that device.
 
 ## Deployment & Updates
 
-NOVIA relies on Expo EAS for continuous deployment.
+### Over-the-air
 
-### Over-The-Air (OTA) Updates
-Changes to JavaScript, styling, or business logic can be shipped directly to installed clients without requiring a native app reinstall:
+JavaScript, styling and business-logic changes ship straight to installed clients:
+
 ```bash
 eas update --channel production --message "Describe changes here"
 ```
 
-### Native Builds
-If native dependencies or plugins are altered, a new native build must be compiled:
+### Native builds
+
+Anything touching native code — a new native dependency, an `app.json` plugin, a build-properties change — needs a fresh binary:
+
 ```bash
-eas build --platform all --profile production
+eas build --platform android --profile production
 ```
 
+`runtimeVersion` is pinned to a literal in `app.json`, so **nothing bumps it for you**. Raise it by hand in the same commit as any native change, or an OTA published afterwards will be served to older installs that lack the new module.
 
 <3
