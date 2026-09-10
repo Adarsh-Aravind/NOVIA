@@ -26,6 +26,7 @@ NOVIA (Noviris) is a React Native application built for two people — a shared 
 - **Shared Tasks** — a synchronised todo list with recurrence and reminders on both phones.
 - **Finance Tracking** — dual-party expense tracking for subscriptions and borrowings.
 - **Cycle Tracking** — predictive period and ovulation modelling with phase-aware guidance.
+- **Ideas & Chat** — a Groq-backed assistant. A free-form chat tab, plus an idea generator reachable from the notes composer whose suggestions save straight to a shared note. It sends only what you type: no moods, check-ins, cycle data or step history ever leave the device through it.
 - **Vocabulary Builder** — a word a day, delivered by notification.
 
 ## Design System
@@ -37,6 +38,8 @@ The visual language lives in [`src/constants/theme.ts`](src/constants/theme.ts) 
 The consequence to design around is that **hue can no longer carry meaning**. Success, warning and danger are not green/amber/red. States are separated by *intensity* instead, backed by icons and explicit wording wherever the distinction matters. Intensity also survives greyscale and colour-vision deficiency, which a five-hue scale does not.
 
 **Materials are dark scrims, not light tints.** `THEME.material.*` composes fill, rim and graded shadow into one spread across four tiers (`thin` / `regular` / `thick` / `chrome`, plus `well` for carved surfaces). They *dim* what sits behind them rather than lightening it — a light tint over the backdrop's orange corner burn turns the card orange and drops accent text to 1.92:1.
+
+**The assistant needs a key.** `EXPO_PUBLIC_GROQ_API_KEY` in `.env` — see [console.groq.com](https://console.groq.com). Note that `EXPO_PUBLIC_*` values are compiled into the JS bundle and readable by anyone who unzips the APK, so this is fine for a free-tier key (the exposure is rate-limit abuse) and not fine for a paid one. Put a server-side proxy in front before spending real money through it. Env vars are read when the bundler **starts**, so adding one means restarting Metro, not just reloading the app.
 
 **Motion is springs, not durations.** `SPRING.*` encodes Apple's two-parameter model (damping ratio + response) converted to React Native's `stiffness`/`damping`/`mass`. Springs animate from wherever a value currently *is*, so they can be re-targeted mid-flight; a fixed-duration curve restarts from the head of its easing and visibly stutters. Bounce is reserved for motion a gesture actually threw.
 
