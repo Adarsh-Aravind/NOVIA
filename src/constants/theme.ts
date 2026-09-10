@@ -89,8 +89,12 @@ export const INK = {
   70: '#C6BFB8', // secondary text
   55: '#968E87',
   50: '#807871', // muted / metadata
-  35: '#56514C', // placeholder text
-  22: '#36322E',
+  // Placeholder text. Raised from #56514C, which sat at 2.6:1 on the ground —
+  // under the 4.5:1 WCAG AA floor, and unreadable in daylight. #7C756E is the
+  // dimmest warm grey that still clears AA, so hint text is legible without
+  // competing with the value the user actually types.
+  35: '#7C756E',
+  22: '#36322E', // structural only — never put text on these or below
   16: '#24211F', // hairlines, barely-there fills
   0: '#000000',
 } as const;
@@ -105,6 +109,14 @@ export const INK = {
  */
 export function alpha(hex: string, a: number): string {
   const h = hex.replace('#', '');
+  // Guard the one way this gets misused: passing something already translucent
+  // (THEME.colors.textMuted, or another alpha() result). parseInt would yield
+  // NaN and emit `rgba(NaN, NaN, NaN, 0.5)`, which React Native drops silently
+  // — an invisible element with no error to trace it back to.
+  if (h.length !== 6 || /[^0-9a-f]/i.test(h)) {
+    console.warn(`[theme] alpha() expects a 6-digit hex, got "${hex}"`);
+    return hex;
+  }
   const r = parseInt(h.slice(0, 2), 16);
   const g = parseInt(h.slice(2, 4), 16);
   const b = parseInt(h.slice(4, 6), 16);

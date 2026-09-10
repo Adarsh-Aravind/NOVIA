@@ -4536,9 +4536,6 @@ const styles = StyleSheet.create({
     color: THEME.colors.textFaint,
     paddingHorizontal: 10,
   },
-  stepCompetitor: {
-    marginTop: 6,
-  },
   stepRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -4562,32 +4559,17 @@ const styles = StyleSheet.create({
   stepValueLead: {
     color: THEME.colors.text,
   },
-  stepTrack: {
-    height: 10,
-    borderRadius: THEME.borderRadius.round,
-    backgroundColor: THEME.glass.inset,
-    marginTop: 8,
-    overflow: 'hidden',
-  },
-  stepFill: {
-    height: '100%',
-    borderRadius: THEME.borderRadius.round,
-    minWidth: 6,
-  },
+  // Icon-only since the duel became a graph — the word "Leading" was carrying
+  // information the two numbers beside it already state. Sized as a circle
+  // rather than left on the old text pill's horizontal padding, which would
+  // stretch a lone icon into a lozenge.
   leaderPill: {
-    flexDirection: 'row',
+    width: 20,
+    height: 20,
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    justifyContent: 'center',
     borderRadius: THEME.borderRadius.round,
     backgroundColor: THEME.colors.primary,
-  },
-  leaderPillText: {
-    fontSize: 10,
-    fontFamily: FONTS.bold,
-    color: THEME.colors.background,
-    letterSpacing: 0.4,
   },
   stepFootnote: {
     fontSize: 11,
