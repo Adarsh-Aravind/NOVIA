@@ -30,7 +30,10 @@ export function useMood(coupleId: string | null, userId: string | null, initialP
 
       if (partnerData) {
         setPartnerMood(partnerData.current_mood);
-        setPartnerName(partnerData.display_name);
+        // Trimmed for the same reason useAuth normalises it: this name is
+        // interpolated straight into sentences, where a stored trailing space
+        // renders as a double space or a detached apostrophe.
+        setPartnerName((partnerData.display_name || '').trim());
       }
     };
 

@@ -58,7 +58,14 @@ CREATE POLICY "Users can update their own profile"
     WITH CHECK (auth.uid() = id);
 
 -- ---------------------------------------------------------------------
--- 3. Consent-validated pairing RPC
+-- 3. Validated pairing RPC
+--
+--    What this validates: the caller is authenticated, isn't pairing with
+--    themselves, and neither side is already in a couple. What it does NOT do
+--    is ask the target to accept — pairing is unilateral, gated only by
+--    knowing the target's (unguessable, deliberately shared) user UUID. A true
+--    two-sided handshake needs a pending-request table and an accept step in
+--    the UI.
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.pair_with_partner(partner_uuid UUID)
 RETURNS UUID

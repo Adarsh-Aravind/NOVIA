@@ -117,16 +117,42 @@ export const THEME = {
     round: 9999,
   },
 
-  // Translucent fills. No hard outlines — depth is carried by these plus shadow.
+  // Translucent fills.
+  //
+  // These stay as the raw fill colours the app already references in ~68
+  // places. The composed materials below (fill + rim + shadow) are what new
+  // surfaces should use — reach for a bare fill only when you need a tint on
+  // something that isn't a pane of glass.
   glass: {
-    surface: 'rgba(237, 237, 244, 0.055)',       // resting frosted glass
-    surfaceStrong: 'rgba(237, 237, 244, 0.095)', // raised / hovered glass
-    inset: 'rgba(0, 0, 0, 0.26)',                // carved-in fields (inputs)
-    accent: 'rgba(14, 149, 148, 0.14)',          // active / selected tint (teal)
-    accentStrong: 'rgba(14, 149, 148, 0.22)',
+    surface: 'rgba(237, 237, 244, 0.075)',       // resting frosted glass
+    surfaceStrong: 'rgba(237, 237, 244, 0.115)', // raised / interactive glass
+    inset: 'rgba(0, 0, 0, 0.28)',                // carved-in wells (inputs, nested rows)
+    accent: 'rgba(14, 149, 148, 0.16)',          // active / selected tint (teal)
+    accentStrong: 'rgba(14, 149, 148, 0.24)',
     moss: 'rgba(14, 149, 148, 0.16)',            // teal tint
     danger: 'rgba(242, 71, 34, 0.16)',
     success: 'rgba(63, 184, 176, 0.13)',
+  },
+
+  /**
+   * Rim light.
+   *
+   * A pane of glass is legible because its *edge* catches light, not because
+   * its face is tinted. The app previously had exactly two borders in ~6000
+   * lines and leaned entirely on shadow, which is why the cards read as flat
+   * tinted panels rather than panes with a thickness.
+   *
+   * One notional light source, high and slightly forward, so every rim in the
+   * app agrees about where the light is. `edge` is the general hairline;
+   * `edgeBright` is for surfaces that sit closest to the viewer; `carved` is a
+   * dark rim that reads as cut *into* a surface rather than raised off it.
+   */
+  rim: {
+    edge: 'rgba(237, 237, 244, 0.13)',
+    edgeBright: 'rgba(237, 237, 244, 0.17)',
+    edgeFaint: 'rgba(237, 237, 244, 0.10)',
+    carved: 'rgba(0, 0, 0, 0.34)',
+    accent: 'rgba(14, 149, 148, 0.42)',
   },
 
   // Soft-UI shadow presets. Large, diffuse shadows lift glass off the deep
@@ -140,17 +166,26 @@ export const THEME = {
   // artifact while leaving iOS depth intact. Opaque surfaces that genuinely
   // need Android lift (e.g. the tab bar) set their own elevation locally.
   shadow: {
+    // Graded by surface size, because a bigger pane reads as a thicker one: a
+    // chip casts a tight shadow, a modal casts a deep diffuse one.
+    chip: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.24,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 0,
+    },
     soft: {
       shadowColor: '#000000',
-      shadowOpacity: 0.34,
-      shadowRadius: 20,
+      shadowOpacity: 0.36,
+      shadowRadius: 22,
       shadowOffset: { width: 0, height: 12 },
       elevation: 0,
     },
     lifted: {
       shadowColor: '#000000',
-      shadowOpacity: 0.42,
-      shadowRadius: 30,
+      shadowOpacity: 0.46,
+      shadowRadius: 34,
       shadowOffset: { width: 0, height: 20 },
       elevation: 0,
     },
@@ -167,6 +202,81 @@ export const THEME = {
       shadowRadius: 20,
       shadowOffset: { width: 0, height: 10 },
       elevation: 0,
+    },
+  },
+
+  /**
+   * Materials — fill + rim + depth as one spread.
+   *
+   * Apple's material tiers, translated to a platform with no backdrop blur.
+   * React Native cannot blur what is behind a view without a native module, so
+   * "thickness" is carried by the three things that *are* available: how opaque
+   * the fill is, how brightly the rim catches the light, and how deep the
+   * shadow falls. A thicker material is more opaque, more lit at the edge, and
+   * further off the background — which is what the blur would have signalled.
+   *
+   * Two rules from the material system that this encodes:
+   *   - Weight is hierarchy. `chrome` is structural (nav, drawer, modals) and
+   *     is *darker* than the content it floats over, so it separates regions
+   *     without competing. `thick` is for things you touch.
+   *   - Never stack a light translucent surface on another. A row nested inside
+   *     a card uses `well`, which is carved (darker + a dark rim), not another
+   *     light pane — two light panes stacked lose their edges and the
+   *     legibility of both collapses.
+   *
+   * If expo-blur is ever added, each tier gains a BlurView backing layer and
+   * these values become the tint on top of it; nothing else has to change.
+   */
+  material: {
+    /** Faint grouping *inside* an already-glass card. */
+    thin: {
+      backgroundColor: 'rgba(237, 237, 244, 0.045)',
+      borderWidth: 1,
+      borderColor: 'rgba(237, 237, 244, 0.10)',
+      shadowColor: '#000000',
+      shadowOpacity: 0.24,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 0,
+    },
+    /** The standard content card. */
+    regular: {
+      backgroundColor: 'rgba(237, 237, 244, 0.075)',
+      borderWidth: 1,
+      borderColor: 'rgba(237, 237, 244, 0.13)',
+      shadowColor: '#000000',
+      shadowOpacity: 0.36,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 0,
+    },
+    /** Raised and interactive — sits closest to the viewer. */
+    thick: {
+      backgroundColor: 'rgba(237, 237, 244, 0.115)',
+      borderWidth: 1,
+      borderColor: 'rgba(237, 237, 244, 0.17)',
+      shadowColor: '#000000',
+      shadowOpacity: 0.42,
+      shadowRadius: 26,
+      shadowOffset: { width: 0, height: 14 },
+      elevation: 0,
+    },
+    /** Structural chrome: tab dock, drawer, modal cards. Darker than content. */
+    chrome: {
+      backgroundColor: 'rgba(32, 35, 52, 0.94)',
+      borderWidth: 1,
+      borderColor: 'rgba(237, 237, 244, 0.11)',
+      shadowColor: '#000000',
+      shadowOpacity: 0.46,
+      shadowRadius: 34,
+      shadowOffset: { width: 0, height: 20 },
+      elevation: 0,
+    },
+    /** Carved into the surface above it: inputs, nested rows, nav tiles. */
+    well: {
+      backgroundColor: 'rgba(0, 0, 0, 0.28)',
+      borderWidth: 1,
+      borderColor: 'rgba(0, 0, 0, 0.34)',
     },
   },
 } as const;

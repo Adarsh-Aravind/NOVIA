@@ -45,9 +45,6 @@
         "android.permission.health.READ_STEPS"
       ]
     },
-    "web": {
-      "favicon": "./assets/novia-favicon.png"
-    },
     "extra": {
       "eas": {
         "projectId": "928a233f-606a-412b-9b2a-6c9e57eba586"

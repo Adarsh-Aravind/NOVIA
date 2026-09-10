@@ -3,6 +3,19 @@ import { supabase } from '../services/supabase';
 import { Profile } from '../types';
 import { Alert } from 'react-native';
 
+/**
+ * Normalise a profile as it comes off the wire.
+ *
+ * display_name is interpolated into a dozen sentences ("<name> is feeling
+ * Happy", "Waiting for <name>'s first sync"), so a single stray space stored on
+ * the row shows up as a double space or a floating apostrophe on every one of
+ * them. Trimming on write only helps names saved since that was added; trimming
+ * on read fixes the rows already in the database too.
+ */
+function normalizeProfile(row: Profile): Profile {
+  return { ...row, display_name: (row.display_name || '').trim() };
+}
+
 export function useAuth() {
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -56,21 +69,31 @@ export function useAuth() {
         return;
       }
 
-      setProfile(myProfile);
+      setProfile(normalizeProfile(myProfile));
       setCoupleId(myProfile.couple_id);
 
       if (myProfile.couple_id) {
         // 2. Fetch partner's profile
-        const { data: partnerData } = await supabase
+        const { data: partnerData, error: partnerErr } = await supabase
           .from('profiles')
           .select('*')
           .eq('couple_id', myProfile.couple_id)
           .neq('id', userId)
           .maybeSingle();
 
-        if (partnerData) {
-          setPartnerProfile(partnerData);
+        if (partnerErr) {
+          // A failed lookup is not evidence the partner is gone — leave whatever
+          // we already had rather than blanking the UI on a flaky connection.
+          console.warn('[Auth] Partner profile fetch failed:', partnerErr);
+        } else {
+          // Assign unconditionally, null included. Only ever setting a non-null
+          // partner meant an unpair performed on the *partner's* device left
+          // their name, mood and advice card stranded on this one for the rest
+          // of the session.
+          setPartnerProfile(partnerData ? normalizeProfile(partnerData) : null);
         }
+      } else {
+        setPartnerProfile(null);
       }
     } catch (err) {
       console.error('Error bootstrapping profile context:', err);
@@ -89,7 +112,7 @@ export function useAuth() {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${session.user.id}` },
         (payload: any) => {
-          const updatedProfile = payload.new as Profile;
+          const updatedProfile = normalizeProfile(payload.new as Profile);
           setProfile(updatedProfile);
           setCoupleId(updatedProfile.couple_id);
           if (updatedProfile.couple_id) {

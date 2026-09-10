@@ -2,6 +2,8 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Clean up any existing tables to avoid duplicate relations
+DROP TABLE IF EXISTS public.step_forfeits CASCADE;
+DROP TABLE IF EXISTS public.step_counts CASCADE;
 DROP TABLE IF EXISTS public.check_ins CASCADE;
 DROP TABLE IF EXISTS public.milestones CASCADE;
 DROP TABLE IF EXISTS public.locations CASCADE;
@@ -230,6 +232,34 @@ CREATE TABLE public.check_ins (
     CONSTRAINT uniq_checkin_per_day UNIQUE (user_id, check_in_date)
 );
 
+-- 16. Step Duel — daily step totals (one row per user per day), couple-scoped.
+--     The client upserts on (user_id, step_date) so the same day is amended in
+--     place as steps accumulate rather than stacking rows.
+CREATE TABLE public.step_counts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    couple_id UUID NOT NULL REFERENCES public.couples(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    step_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    steps INTEGER NOT NULL DEFAULT 0 CHECK (steps >= 0),
+    created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    CONSTRAINT uniq_steps_per_day UNIQUE (user_id, step_date)
+);
+
+-- 17. Step Duel — the quarterly stakes: what the season's loser owes the
+--     champion. One row per couple per period_key (e.g. '2026-Q3'); either
+--     partner may set it, and the writer stamps themselves as set_by.
+CREATE TABLE public.step_forfeits (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    couple_id UUID NOT NULL REFERENCES public.couples(id) ON DELETE CASCADE,
+    period_key TEXT NOT NULL,          -- calendar quarter, e.g. '2026-Q3'
+    forfeit TEXT NOT NULL,             -- the dare/stakes the loser owes
+    set_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    CONSTRAINT uniq_forfeit_per_period UNIQUE (couple_id, period_key)
+);
+
 ---
 --- ROW LEVEL SECURITY & RELATIONAL ACCESS POLICIES
 ---
@@ -252,6 +282,8 @@ ALTER TABLE public.bucket_list ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.locations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.milestones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.check_ins ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.step_counts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.step_forfeits ENABLE ROW LEVEL SECURITY;
 
 -- Helper Function to resolve current user's active couple ID
 CREATE OR REPLACE FUNCTION public.get_couple_id()
@@ -450,6 +482,38 @@ CREATE POLICY "Delete own check-in"
     ON public.check_ins FOR DELETE
     USING (user_id = auth.uid());
 
+-- Step Duel counts: both partners READ every row in the couple (that's the
+-- duel), each user WRITES only their own.
+CREATE POLICY "Read couple steps"
+    ON public.step_counts FOR SELECT
+    USING (couple_id = public.get_couple_id());
+CREATE POLICY "Insert own steps"
+    ON public.step_counts FOR INSERT
+    WITH CHECK (couple_id = public.get_couple_id() AND user_id = auth.uid());
+CREATE POLICY "Update own steps"
+    ON public.step_counts FOR UPDATE
+    USING (user_id = auth.uid())
+    WITH CHECK (user_id = auth.uid() AND couple_id = public.get_couple_id());
+CREATE POLICY "Delete own steps"
+    ON public.step_counts FOR DELETE
+    USING (user_id = auth.uid());
+
+-- Step Duel stakes: couple-trusted — both partners read, and either may set or
+-- edit their couple's forfeit, but the writer must stamp themselves as set_by.
+CREATE POLICY "Read couple forfeits"
+    ON public.step_forfeits FOR SELECT
+    USING (couple_id = public.get_couple_id());
+CREATE POLICY "Insert couple forfeit"
+    ON public.step_forfeits FOR INSERT
+    WITH CHECK (couple_id = public.get_couple_id() AND set_by = auth.uid());
+CREATE POLICY "Update couple forfeit"
+    ON public.step_forfeits FOR UPDATE
+    USING (couple_id = public.get_couple_id())
+    WITH CHECK (couple_id = public.get_couple_id() AND set_by = auth.uid());
+CREATE POLICY "Delete couple forfeit"
+    ON public.step_forfeits FOR DELETE
+    USING (couple_id = public.get_couple_id());
+
 -- Policies for Personal User-scoped tables (Diet, Sleep, Medical Records Vault)
 CREATE POLICY "Allow access to own diet logs"
     ON public.diet_logs FOR ALL
@@ -501,7 +565,16 @@ BEGIN
 END;
 $$;
 
--- Consent-validated pairing / unpairing (see migration 20260705_security_hardening.sql)
+-- Validated pairing / unpairing (see migration 20260705_security_hardening.sql).
+--
+-- Scope of the guarantee, stated precisely: this RPC validates that the caller
+-- is authenticated, isn't pairing with themselves, and that NEITHER side is
+-- already in a couple. It does NOT ask the target to accept — pairing is
+-- unilateral, and the only thing standing between a stranger and your account
+-- is that they'd need your user UUID, which is unguessable and shared
+-- deliberately. Treat that UUID as the pairing secret it effectively is.
+-- Turning this into a real two-sided handshake means a pending-request table
+-- and an accept step in the UI; it is not something the RPC can do alone.
 CREATE OR REPLACE FUNCTION public.pair_with_partner(partner_uuid UUID)
 RETURNS UUID
 LANGUAGE plpgsql
@@ -598,3 +671,51 @@ CREATE INDEX idx_medical_user_type ON public.medical_vault(user_id, metric_type)
 CREATE INDEX idx_locations_couple_id ON public.locations(couple_id);
 CREATE INDEX idx_milestones_couple_date ON public.milestones(couple_id, milestone_date);
 CREATE INDEX idx_checkins_couple_date ON public.check_ins(couple_id, check_in_date DESC);
+CREATE INDEX idx_steps_couple_date ON public.step_counts(couple_id, step_date DESC);
+CREATE INDEX idx_forfeits_couple_period ON public.step_forfeits(couple_id, period_key);
+
+---
+--- SUPABASE REALTIME
+---
+-- Every `postgres_changes` subscription in the app requires its table to be a
+-- member of the `supabase_realtime` publication. Without membership the client
+-- subscribes successfully and then silently receives nothing — a dead feed that
+-- is indistinguishable from a working one, which is exactly how the Step Duel
+-- shipped: each phone only saw the other's steps as of its own last launch.
+--
+-- REPLICA IDENTITY FULL puts every column in the pre-image of an UPDATE/DELETE,
+-- so the `couple_id=eq.<id>` filters (and RLS) can be evaluated on those events
+-- too, not just on INSERT. These tables are small and heavily upserted, so the
+-- extra WAL volume is negligible next to getting the filters right.
+--
+-- Keep this list in step with the `table:` names passed to supabase.channel()
+-- in App.tsx and src/hooks/*.
+DO $$
+DECLARE
+    t TEXT;
+BEGIN
+    FOREACH t IN ARRAY ARRAY[
+        'profiles',
+        'notes',
+        'todos',
+        'complaints',
+        'complaint_replies',
+        'milestones',
+        'check_ins',
+        'periods',
+        'finances',
+        'bucket_list',
+        'app_updates',
+        'step_counts',
+        'step_forfeits'
+    ]
+    LOOP
+        EXECUTE format('ALTER TABLE public.%I REPLICA IDENTITY FULL', t);
+        BEGIN
+            EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', t);
+        EXCEPTION
+            WHEN duplicate_object THEN NULL; -- already published
+            WHEN undefined_object THEN NULL; -- publication absent on this project
+        END;
+    END LOOP;
+END $$;

@@ -59,8 +59,21 @@ export function unseenUpdates(updates: AppUpdate[], lastSeenAt: string | null): 
  * reloading straight away is invisible rather than disruptive.
  *
  * NOTE: OTA only ships JS/asset changes. Anything touching native code still
- * needs a fresh `eas build` — `runtimeVersion` uses the `fingerprint` policy,
- * so it changes automatically when (and only when) the native runtime does.
+ * needs a fresh `eas build`.
+ *
+ * app.json pins `"runtimeVersion": "1"` — a literal, NOT the `fingerprint`
+ * policy. Nothing bumps it for you, so an update published after a native
+ * change is still served to older installs that lack the new native module:
+ * they download JS that imports something that isn't there. This is why
+ * [[useSteps]] lazily `require`s react-native-health-connect inside a
+ * try/catch instead of importing it at module scope — the alternative was a
+ * white screen on every phone still running the pre-Health-Connect build.
+ *
+ * So: bump `runtimeVersion` by hand in the same commit as any native change
+ * (a new native dep, an app.json plugin, a build-properties tweak), and ship a
+ * new `eas build` for it. Switching to `"runtimeVersion": { "policy":
+ * "fingerprint" }` automates exactly this, at the cost of cutting existing
+ * installs off from OTA until they're rebuilt.
  */
 export async function checkAndApplyUpdate(): Promise<void> {
   // No embedded update system while running in Expo Go / dev client hot-reload.

@@ -114,15 +114,6 @@ export interface SharedNote {
   reactions?: Record<string, string>;
 }
 
-export interface Brainstorm {
-  id: string;
-  couple_id: string;
-  category: 'todo' | 'study' | 'date_ideas';
-  title: string;
-  description: string | null;
-  created_by: string;
-  created_at: string;
-}
 
 export interface FinanceItem {
   id: string;
@@ -154,26 +145,7 @@ export interface PeriodRecord {
   created_at: string;
 }
 
-export interface DietLog {
-  id: string;
-  user_id: string;
-  log_date: string;
-  calories: number;
-  meal_type: 'breakfast' | 'lunch' | 'dinner' | 'snack';
-  food_description: string | null;
-  created_at: string;
-}
 
-export interface SleepLog {
-  id: string;
-  user_id: string;
-  log_date: string;
-  sleep_time: string;
-  wake_time: string;
-  duration_minutes: number;
-  quality_rating: number;
-  created_at: string;
-}
 
 export interface MedicalRecord {
   id: string;
@@ -186,15 +158,6 @@ export interface MedicalRecord {
   created_at: string;
 }
 
-export interface PartnerLocation {
-  user_id: string;
-  couple_id: string;
-  latitude: number;
-  longitude: number;
-  accuracy: number | null;
-  place_label: string | null;
-  updated_at: string;
-}
 
 export interface BucketListItem {
   id: string;

@@ -120,7 +120,3 @@ export async function scheduleSharedReminder({
     data: { reminderKey },
   });
 }
-
-export async function cancelAllScheduledNotifications() {
-  await Notifications.cancelAllScheduledNotificationsAsync();
-}

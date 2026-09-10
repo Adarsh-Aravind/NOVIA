@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../services/supabase';
 import { StepCount, StepForfeit } from '../types';
 
@@ -53,6 +54,17 @@ function toLocalISODate(d: Date): string {
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * How often to re-read Health Connect and re-sync while the app is open.
+ *
+ * Without this the duel only moved on mount and on foreground, so two phones
+ * left open side by side both sat on stale numbers indefinitely: neither pushes
+ * a fresh total, and neither is told to re-read. A minute is well inside how
+ * fast Google Fit trickles into Health Connect, and the write is skipped when
+ * the total hasn't moved, so an idle phone costs one cheap SELECT.
+ */
+const REFRESH_MS = 60_000;
 
 interface QuarterInfo {
   startISO: string;
@@ -206,6 +218,29 @@ export function useSteps(
   // Guards against setState after unmount and against overlapping reads.
   const mounted = useRef(true);
   const reading = useRef(false);
+  // An overlapping load() used to be dropped outright. The effect below re-runs
+  // the moment partnerId resolves (a tick after mount), so the dropped call was
+  // reliably the *first* one that knew who the partner was — leaving their
+  // number at 0 until the next foreground. Queue the re-run instead of losing it.
+  const rerun = useRef(false);
+  // Last total we know is on the server for a given day, so a poll that finds
+  // nothing new can skip the write entirely.
+  const lastSync = useRef<{ date: string; steps: number } | null>(null);
+  // Held so a write can nudge the partner directly (see the effect below).
+  const channelRef = useRef<RealtimeChannel | null>(null);
+
+  /**
+   * Best-effort nudge to the other device over the live socket.
+   *
+   * Gated on the channel actually having joined: send() otherwise falls back to
+   * a (deprecated, log-noisy) REST post, and a nudge that early is redundant
+   * anyway — the other side is about to pick the write up on its own poll.
+   */
+  const announce = useCallback((event: 'steps_updated' | 'forfeit_updated') => {
+    const channel = channelRef.current;
+    if (!channel || String(channel.state) !== 'joined') return;
+    channel.send({ type: 'broadcast', event, payload: {} });
+  }, []);
 
   // Pull this quarter's rows for the couple: drive today's partner number, the
   // season tally, and the win streak. Returns my own last-synced total for today
@@ -329,13 +364,19 @@ export function useSteps(
         console.warn('[Steps] Set forfeit failed:', error);
         return;
       }
+      announce('forfeit_updated');
       await fetchForfeit();
     },
-    [coupleId, userId, fetchForfeit]
+    [coupleId, userId, fetchForfeit, announce]
   );
 
-  const load = useCallback(async () => {
-    if (reading.current) return;
+  // Explicitly typed so the queued self-call in `finally` doesn't make `load`
+  // circular for the type checker.
+  const load = useCallback<() => Promise<void>>(async () => {
+    if (reading.current) {
+      rerun.current = true;
+      return;
+    }
     reading.current = true;
     try {
       // Season, partner, forfeit, and my last-synced total first — instant, and
@@ -349,25 +390,47 @@ export function useSteps(
       setStatus(own.status);
 
       if (own.status === 'ready') {
-        setMySteps(own.steps);
-        if (coupleId && userId) {
+        const today = toLocalISODate(new Date());
+        // Server truth for today, falling back to our own last write when the
+        // season fetch failed (offline) rather than re-pushing blindly.
+        const known =
+          lastSynced ?? (lastSync.current?.date === today ? lastSync.current.steps : null);
+
+        // Steps only climb within a day, so a 0 from a Health Connect source
+        // that dropped out mid-day is noise — never let it wipe a real total.
+        const total = own.steps === 0 && known != null && known > 0 ? known : own.steps;
+        setMySteps(total);
+
+        // Skipping the no-op write matters on the minute timer: it keeps an idle
+        // phone from re-upserting the same number and waking the partner's
+        // subscription sixty times an hour for nothing.
+        if (coupleId && userId && total !== known) {
           const { error } = await supabase.from('step_counts').upsert(
             {
               couple_id: coupleId,
               user_id: userId,
-              step_date: toLocalISODate(new Date()),
-              steps: own.steps,
+              step_date: today,
+              steps: total,
               updated_at: new Date().toISOString(),
             },
             { onConflict: 'user_id,step_date' }
           );
-          if (error) console.warn('[Steps] Sync failed:', error);
+          if (error) {
+            console.warn('[Steps] Sync failed:', error);
+          } else {
+            lastSync.current = { date: today, steps: total };
+            announce('steps_updated');
+          }
         }
       }
     } finally {
       reading.current = false;
+      if (rerun.current) {
+        rerun.current = false;
+        if (mounted.current) load();
+      }
     }
-  }, [coupleId, userId, fetchSeason, fetchForfeit]);
+  }, [coupleId, userId, fetchSeason, fetchForfeit, announce]);
 
   // Gesture-driven permission prompt; re-read once granted.
   const requestAccess = useCallback(async () => {
@@ -385,15 +448,16 @@ export function useSteps(
       };
     }
 
-    load();
-
-    // Refresh on foreground — Google Fit → Health Connect sync lags, and the
-    // partner may have synced while we were backgrounded.
-    const appStateSub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') load();
-    });
-
-    // Live updates for both the daily counts and the stakes.
+    // Live updates for both the daily counts and the stakes. Subscribed before
+    // the first load() so that load's own write has a channel to announce on.
+    //
+    // Two paths on purpose. `postgres_changes` requires step_counts /
+    // step_forfeits to be members of the `supabase_realtime` publication (see
+    // 20260910_step_realtime.sql); on a project where that migration hasn't been
+    // applied the subscription joins happily and then never delivers a single
+    // event — which is exactly how this shipped. The broadcasts ride the same
+    // socket and need no server-side setup, so the duel stays live either way
+    // (mirrors [[useRealtimeNotes]]).
     const channel = supabase
       .channel(`steps-sync:${coupleId}`)
       .on(
@@ -406,11 +470,37 @@ export function useSteps(
         { event: '*', schema: 'public', table: 'step_forfeits', filter: `couple_id=eq.${coupleId}` },
         () => fetchForfeit()
       )
-      .subscribe();
+      .on('broadcast', { event: 'steps_updated' }, () => fetchSeason())
+      .on('broadcast', { event: 'forfeit_updated' }, () => fetchForfeit())
+      .subscribe((state) => {
+        // A silent CHANNEL_ERROR is why a broken subscription looked like a
+        // working one for so long. Say something.
+        if (state === 'CHANNEL_ERROR' || state === 'TIMED_OUT') {
+          console.warn('[Steps] Realtime channel', state);
+        }
+      });
+    channelRef.current = channel;
+
+    load();
+
+    // Refresh on foreground — Google Fit → Health Connect sync lags, and the
+    // partner may have synced while we were backgrounded.
+    const appStateSub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') load();
+    });
+
+    // ...and on a timer while the app stays open, which foreground events never
+    // cover. This is also what rolls the duel over at midnight, since load() and
+    // fetchSeason() both re-derive "today" on every run.
+    const timer = setInterval(() => {
+      if (AppState.currentState === 'active') load();
+    }, REFRESH_MS);
 
     return () => {
       mounted.current = false;
+      clearInterval(timer);
       appStateSub.remove();
+      channelRef.current = null;
       supabase.removeChannel(channel);
     };
   }, [coupleId, load, fetchSeason, fetchForfeit]);

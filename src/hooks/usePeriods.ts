@@ -9,7 +9,14 @@ export function usePeriods(coupleId: string | null) {
   const [loading, setLoading] = useState<boolean>(true);
 
   const fetchPeriodLogs = async () => {
-    if (!coupleId) return;
+    if (!coupleId) {
+      // Returning before the finally block left `loading` stuck true forever for
+      // an unpaired user — a spinner that could never resolve.
+      setRecords([]);
+      setPredictions(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const { data, error } = await supabase
@@ -51,9 +58,20 @@ export function usePeriods(coupleId: string | null) {
     };
   }, [coupleId]);
 
-  const addPeriodLog = async (startDate: string, endDate: string | null, symptoms: string[], notes: string | null) => {
-    if (!coupleId) return;
-    
+  /**
+   * Log a cycle start. Returns whether it actually landed — the caller shows a
+   * confirmation, and swallowing the error here made a failed insert look
+   * saved: the alert said "logged and predicted instantly" while nothing had
+   * been written and the predictions never moved.
+   */
+  const addPeriodLog = async (
+    startDate: string,
+    endDate: string | null,
+    symptoms: string[],
+    notes: string | null
+  ): Promise<boolean> => {
+    if (!coupleId) return false;
+
     const { error } = await supabase.from('periods').insert({
       couple_id: coupleId,
       start_date: startDate,
@@ -63,7 +81,11 @@ export function usePeriods(coupleId: string | null) {
       created_at: new Date().toISOString(),
     });
 
-    if (error) console.error('[Periods Hook] Insert failed:', error);
+    if (error) {
+      console.error('[Periods Hook] Insert failed:', error);
+      return false;
+    }
+    return true;
   };
 
   return {

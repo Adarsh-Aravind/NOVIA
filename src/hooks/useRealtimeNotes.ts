@@ -1,12 +1,25 @@
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { Alert } from 'react-native';
 import { supabase } from '../services/supabase';
 import { SharedNote } from '../types';
+
+/** Don't re-broadcast "still typing" more often than this. */
+const TYPING_PING_MS = 2000;
+/**
+ * Clear the partner's typing banner this long after their last ping.
+ *
+ * Broadcast is fire-and-forget: a "stopped typing" message can be dropped, and
+ * a partner who backgrounds the app mid-word never sends one at all. Without an
+ * expiry the banner latches on until the screen unmounts.
+ */
+const TYPING_TTL_MS = 5000;
 
 export function useRealtimeNotes(coupleId: string | null, userId: string | null) {
   const [notes, setNotes] = useState<SharedNote[]>([]);
   const [isPartnerTyping, setIsPartnerTyping] = useState<boolean>(false);
   const channelRef = useRef<any>(null);
+  const typingExpiry = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTypingPing = useRef<number>(0);
 
   const fetchNotes = async () => {
     if (!coupleId) return;
@@ -44,8 +57,12 @@ export function useRealtimeNotes(coupleId: string | null, userId: string | null)
         () => fetchNotes()
       )
       .on('broadcast', { event: 'typing' }, ({ payload }) => {
-        if (payload.userId !== userId) {
-          setIsPartnerTyping(payload.isTyping);
+        if (payload.userId === userId) return;
+        setIsPartnerTyping(!!payload.isTyping);
+
+        if (typingExpiry.current) clearTimeout(typingExpiry.current);
+        if (payload.isTyping) {
+          typingExpiry.current = setTimeout(() => setIsPartnerTyping(false), TYPING_TTL_MS);
         }
       })
       .on('broadcast', { event: 'notes_updated' }, () => {
@@ -54,9 +71,42 @@ export function useRealtimeNotes(coupleId: string | null, userId: string | null)
       .subscribe();
 
     return () => {
+      if (typingExpiry.current) clearTimeout(typingExpiry.current);
+      setIsPartnerTyping(false);
       if (channelRef.current) supabase.removeChannel(channelRef.current);
     };
   }, [coupleId, userId]);
+
+  /**
+   * Tell the partner whether we're composing a note.
+   *
+   * The 'typing' listener above shipped with nothing anywhere in the app that
+   * ever sent this event, so "Companion is active in shared notes..." could
+   * never appear. Call it from the composer's onChangeText (true) and from
+   * blur/send (false).
+   */
+  const setTyping = useCallback(
+    (isTyping: boolean) => {
+      const channel = channelRef.current;
+      // send() otherwise falls back to a deprecated REST post — pointless for an
+      // ephemeral keystroke ping.
+      if (!channel || !userId || String(channel.state) !== 'joined') return;
+
+      if (isTyping) {
+        // Throttle the keystroke stream; the receiver's TTL keeps the banner up
+        // between pings.
+        const now = Date.now();
+        if (now - lastTypingPing.current < TYPING_PING_MS) return;
+        lastTypingPing.current = now;
+      } else {
+        // Always let a "stopped" through, and re-arm the throttle.
+        lastTypingPing.current = 0;
+      }
+
+      channel.send({ type: 'broadcast', event: 'typing', payload: { userId, isTyping } });
+    },
+    [userId]
+  );
 
   const addNote = async (content: string): Promise<boolean> => {
     if (!coupleId || !userId) return false;
@@ -194,6 +244,7 @@ export function useRealtimeNotes(coupleId: string | null, userId: string | null)
   return {
     notes,
     isPartnerTyping,
+    setTyping,
     addNote,
     removeNote,
     toggleReaction,

@@ -16,7 +16,8 @@ import {
   Modal,
   AppState,
   Dimensions,
-  BackHandler
+  BackHandler,
+  PanResponder
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import Constants from 'expo-constants';
@@ -36,6 +37,7 @@ import { useCheckIns } from './src/hooks/useCheckIns';
 import { useSteps } from './src/hooks/useSteps';
 import { Skeleton } from './src/components/common/Skeleton';
 import { HubSkeleton } from './src/components/common/HubSkeleton';
+import { GlassBacking, GlassCard } from './src/components/common/GlassCard';
 import { configureNotificationsAsync, PRIORITY_CHANNEL } from './src/services/notification';
 import { cancelScheduledNotificationsByPrefix, scheduleSharedReminder, scheduleLocalNotification } from './src/services/notification';
 import { supabase } from './src/services/supabase';
@@ -57,7 +59,7 @@ import {
   nextOccurrence,
   occursOn,
 } from './src/utils/milestoneMath';
-import { FinanceItem } from './src/types';
+import { BucketListItem, FinanceItem, MedicalRecord } from './src/types';
 import { getWordOfDay } from './src/constants/vocabulary';
 import { useFonts } from 'expo-font';
 import { Fraunces_600SemiBold } from '@expo-google-fonts/fraunces/600SemiBold';
@@ -68,6 +70,8 @@ import { Manrope_600SemiBold } from '@expo-google-fonts/manrope/600SemiBold';
 import { Manrope_700Bold } from '@expo-google-fonts/manrope/700Bold';
 import { Manrope_800ExtraBold } from '@expo-google-fonts/manrope/800ExtraBold';
 import { FONTS, PALETTE, THEME } from './src/constants/theme';
+import { SPRING, projectMomentum } from './src/constants/motion';
+import { useReducedMotion } from './src/hooks/useReducedMotion';
 
 // Quick emoji reactions available on each shared note.
 const NOTE_REACTIONS = ['❤️', '😂', '👍', '🥺', '🔥'] as const;
@@ -143,7 +147,24 @@ const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
 /**
  * PressableScale — a touchable that gently springs inward on press.
  * Gives every interactive glass surface a soft, tactile neumorphic response.
+ *
+ * Two details that separate this from a plain TouchableOpacity:
+ *
+ * The scale fires on press *down*, not on release. The instant feedback is the
+ * whole point — waiting for touch-up to acknowledge a press is the single
+ * loudest way an interface reads as laggy, and no amount of animation polish
+ * afterwards recovers it.
+ *
+ * Both directions use the same critically-damped spring. The release used to
+ * bounce (`bounciness: 7`), but a finger lifting off carries no momentum into
+ * the element, so the overshoot was decoration pretending to be physics. Bounce
+ * belongs on motion a gesture actually threw — see SPRING.flick.
+ *
+ * The default hitSlop is deliberate: the touch target should extend past the
+ * visible bounds, so a press that lands a few pixels off still reads as a hit.
  */
+const PRESS_HIT_SLOP = { top: 10, bottom: 10, left: 10, right: 10 };
+
 function PressableScale({
   children,
   onPress,
@@ -152,7 +173,7 @@ function PressableScale({
   scaleTo = 0.96,
   disabled = false,
   activeOpacity = 0.92,
-  hitSlop,
+  hitSlop = PRESS_HIT_SLOP,
 }: {
   children: React.ReactNode;
   onPress?: () => void;
@@ -165,9 +186,9 @@ function PressableScale({
 }) {
   const scale = useRef(new Animated.Value(1)).current;
   const pressIn = () =>
-    Animated.spring(scale, { toValue: scaleTo, useNativeDriver: true, speed: 50, bounciness: 0 }).start();
+    Animated.spring(scale, { toValue: scaleTo, useNativeDriver: true, ...SPRING.press }).start();
   const pressOut = () =>
-    Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 40, bounciness: 7 }).start();
+    Animated.spring(scale, { toValue: 1, useNativeDriver: true, ...SPRING.press }).start();
   return (
     <AnimatedTouchable
       activeOpacity={activeOpacity}
@@ -211,7 +232,16 @@ function SubmitButton({
   const inFlight = useRef(false);
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
+  // The primary CTA was the *least* responsive control in the app: every glass
+  // surface sprang under the finger via PressableScale, while the button you
+  // actually came to press only dimmed. Same press spring, same instant
+  // acknowledgement — the dim on top now reads as "working", not as the only
+  // feedback there is.
+  const scale = useRef(new Animated.Value(1)).current;
   useEffect(() => () => { mounted.current = false; }, []);
+
+  const springTo = (toValue: number) =>
+    Animated.spring(scale, { toValue, useNativeDriver: true, ...SPRING.press }).start();
 
   const handlePress = async () => {
     if (inFlight.current || disabled) return;
@@ -226,14 +256,17 @@ function SubmitButton({
   };
 
   return (
-    <TouchableOpacity
-      style={[style, busy && { opacity: 0.6 }]}
+    <AnimatedTouchable
+      style={[style, busy && { opacity: 0.6 }, { transform: [{ scale }] }]}
       onPress={handlePress}
+      onPressIn={() => springTo(0.97)}
+      onPressOut={() => springTo(1)}
       disabled={disabled || busy}
       activeOpacity={activeOpacity}
+      hitSlop={PRESS_HIT_SLOP}
     >
       {children}
-    </TouchableOpacity>
+    </AnimatedTouchable>
   );
 }
 
@@ -276,6 +309,7 @@ const FadeInUp = React.memo(function FadeInUp({
   style?: any;
 }) {
   const anim = useRef(new Animated.Value(0)).current;
+  const reducedMotion = useReducedMotion();
   useEffect(() => {
     const animation = Animated.timing(anim, {
       toValue: 1,
@@ -290,6 +324,12 @@ const FadeInUp = React.memo(function FadeInUp({
     return () => animation.stop();
   }, [anim, index]);
 
+  // Reduced motion keeps the fade — it still communicates "this is arriving" —
+  // and drops only the travel, which is the part that provokes motion
+  // sensitivity. Cutting the animation entirely would lose the staggering that
+  // tells you the cards are a sequence, not one wall of content.
+  const travel = reducedMotion ? 0 : distance;
+
   return (
     <Animated.View
       style={[
@@ -297,7 +337,7 @@ const FadeInUp = React.memo(function FadeInUp({
         {
           opacity: anim,
           transform: [
-            { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [distance, 0] }) },
+            { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [travel, 0] }) },
           ],
         },
       ]}
@@ -328,7 +368,16 @@ function Breathing({
   style?: any;
 }) {
   const anim = useRef(new Animated.Value(0)).current;
+  const reducedMotion = useReducedMotion();
   useEffect(() => {
+    // A full-viewport brightness oscillation with a ~10s period sits squarely in
+    // the band that provokes motion sensitivity — a slow ambient pulse is the
+    // textbook case for honouring reduce-motion. Hold it at the bright end so
+    // the backdrop keeps its intended look, just without the breathing.
+    if (reducedMotion) {
+      anim.setValue(1);
+      return;
+    }
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(anim, { toValue: 1, duration, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
@@ -337,7 +386,7 @@ function Breathing({
     );
     loop.start();
     return () => loop.stop();
-  }, [anim, duration]);
+  }, [anim, duration, reducedMotion]);
 
   return (
     <Animated.View
@@ -362,9 +411,10 @@ function Breathing({
 function Shimmer({ delay = 0, period = 5200 }: { delay?: number; period?: number }) {
   const anim = useRef(new Animated.Value(0)).current;
   const [size, setSize] = useState({ width: 0, height: 0 });
+  const reducedMotion = useReducedMotion();
 
   useEffect(() => {
-    if (size.width === 0) return;
+    if (size.width === 0 || reducedMotion) return;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.delay(delay),
@@ -381,9 +431,13 @@ function Shimmer({ delay = 0, period = 5200 }: { delay?: number; period?: number
     );
     loop.start();
     return () => loop.stop();
-  }, [anim, delay, period, size.width]);
+  }, [anim, delay, period, size.width, reducedMotion]);
 
   const band = Math.max(size.height * 1.6, 48);
+
+  // Pure decoration with no informational job — under reduce-motion it simply
+  // shouldn't exist, rather than being animated more gently.
+  if (reducedMotion) return null;
 
   return (
     <View
@@ -426,6 +480,21 @@ function Shimmer({ delay = 0, period = 5200 }: { delay?: number; period?: number
  * scaleX scales about the centre, which would make the bar grow from the middle
  * outward. Translating by (scale - 1) * width / 2 pins the left edge in place;
  * both values are interpolated from the same driver so they stay in lockstep.
+ *
+ * The driver holds the *progress itself* (0..1), not a generic 0→1 ramp. An
+ * earlier version always animated the driver to 1 and folded `target` into the
+ * output range: once it had reached 1, a new target only changed the range, so
+ * every later value snapped into place instead of sliding — the step bars never
+ * animated after their first paint. Animating the driver *to* the target keeps
+ * the interpolations constant and makes each update a real transition from
+ * wherever the bar currently sits.
+ *
+ * And it's a spring, not a 900ms easing curve, because the value behind it
+ * moves on its own schedule: a step count arrives from a partner's phone
+ * whenever it arrives, sometimes twice within a second. A timing curve
+ * re-targeted mid-flight restarts from the head of its easing, so the bar
+ * visibly stutters; a spring re-targets from its current position *and*
+ * current velocity, so consecutive updates read as one continuous movement.
  */
 function AnimatedBar({
   progress,
@@ -440,19 +509,23 @@ function AnimatedBar({
 }) {
   const anim = useRef(new Animated.Value(0)).current;
   const [width, setWidth] = useState(0);
+  const reducedMotion = useReducedMotion();
   const target = Math.max(0, Math.min(1, Number.isFinite(progress) ? progress : 0));
 
   useEffect(() => {
     if (width === 0) return; // wait for measurement, otherwise the maths is meaningless
-    const animation = Animated.timing(anim, {
-      toValue: 1,
-      duration: 900,
-      easing: Easing.out(Easing.cubic),
+    if (reducedMotion) {
+      anim.setValue(target);
+      return;
+    }
+    const animation = Animated.spring(anim, {
+      toValue: target,
       useNativeDriver: true,
+      ...SPRING.move,
     });
     animation.start();
     return () => animation.stop();
-  }, [anim, width, target]);
+  }, [anim, width, target, reducedMotion]);
 
   return (
     <View
@@ -468,8 +541,9 @@ function AnimatedBar({
               width: '100%',
               backgroundColor: color,
               transform: [
-                { translateX: anim.interpolate({ inputRange: [0, 1], outputRange: [-width / 2, ((target - 1) * width) / 2] }) },
-                { scaleX: anim.interpolate({ inputRange: [0, 1], outputRange: [0, target] }) },
+                // p → (p - 1) * width / 2, i.e. -width/2 at empty, 0 at full.
+                { translateX: anim.interpolate({ inputRange: [0, 1], outputRange: [-width / 2, 0] }) },
+                { scaleX: anim },
               ],
             },
           ]}
@@ -485,6 +559,7 @@ function AnimatedBar({
  */
 function ScreenTransition({ children }: { children: React.ReactNode }) {
   const anim = useRef(new Animated.Value(0)).current;
+  const reducedMotion = useReducedMotion();
   useEffect(() => {
     anim.setValue(0);
     Animated.timing(anim, {
@@ -494,13 +569,18 @@ function ScreenTransition({ children }: { children: React.ReactNode }) {
       useNativeDriver: true,
     }).start();
   }, []);
+  // A whole screen rising and scaling is the largest single movement in the
+  // app; under reduce-motion it becomes a plain cross-fade, which still marks
+  // the screen change without the travel.
+  const travel = reducedMotion ? 0 : 18;
+  const from = reducedMotion ? 1 : 0.985;
   return (
     <Animated.View
       style={{
         opacity: anim,
         transform: [
-          { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) },
-          { scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.985, 1] }) },
+          { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [travel, 0] }) },
+          { scale: anim.interpolate({ inputRange: [0, 1], outputRange: [from, 1] }) },
         ],
       }}
     >
@@ -548,6 +628,9 @@ const TAB_ICONS: Record<string, React.ComponentType<{ size?: number; color?: str
 // back button and their on-screen back rows both return from these to the Hub.
 const HUB_SUBSCREENS = ['todos', 'milestones', 'complaints', 'bucket'];
 
+/** Side drawer width. Shared by the panel style and the drag maths. */
+const DRAWER_WIDTH = 280;
+
 function AnimatedTabBar<T extends string>({
   tabs,
   activeTab,
@@ -565,16 +648,24 @@ function AnimatedTabBar<T extends string>({
   const onBar = activeIndex >= 0;
   const indicator = useRef(new Animated.Value(onBar ? activeIndex : 0)).current;
   const slotW = barW > 0 ? (barW - INNER_PAD * 2) / tabs.length : 0;
+  const reducedMotion = useReducedMotion();
 
   useEffect(() => {
     if (!onBar) return;
+    if (reducedMotion) {
+      indicator.setValue(activeIndex);
+      return;
+    }
+    // Critically damped, not the old bounciness: 9. A tab is selected by a tap,
+    // and a tap imparts no momentum for the indicator to overshoot with — the
+    // bounce was the indicator claiming physics that never happened. It now
+    // glides and stops exactly where the finger said.
     Animated.spring(indicator, {
       toValue: activeIndex,
       useNativeDriver: true,
-      speed: 18,
-      bounciness: 9,
+      ...SPRING.snap,
     }).start();
-  }, [activeIndex, onBar]);
+  }, [activeIndex, onBar, indicator, reducedMotion]);
 
   const translateX = indicator.interpolate({
     inputRange: tabs.map((_, i) => i),
@@ -583,6 +674,7 @@ function AnimatedTabBar<T extends string>({
 
   return (
     <View style={[styles.tabBar, { bottom: TAB_BAR_BOTTOM }]} onLayout={(e) => setBarW(e.nativeEvent.layout.width)}>
+      <GlassBacking radius={34} tier="chrome" />
       {slotW > 0 && onBar && (
         <Animated.View
           pointerEvents="none"
@@ -614,29 +706,43 @@ function AnimatedTabBar<T extends string>({
   );
 }
 
+/**
+ * A bucket-list row that acknowledges the tap and commits it at the same time.
+ *
+ * This used to run a six-step, 720ms blink and fire onToggle() in the
+ * completion callback — the outcome was gated behind the decoration, so ticking
+ * an item took the better part of a second and re-tapping during the blink did
+ * nothing. Feedback and commit are now concurrent: the checkbox flips on the
+ * frame you lift your finger (the parent updates optimistically), and a single
+ * confirming pulse plays over the top rather than three flashes demanding
+ * attention the action doesn't warrant.
+ */
 const BlinkingBucketRow = ({ item, getCreatorName, onToggle, onDelete }: { item: any; getCreatorName: (creatorId?: string | null) => string; onToggle: () => void; onDelete: () => void }) => {
   const blinkAnim = React.useRef(new Animated.Value(1)).current;
+  const scale = React.useRef(new Animated.Value(1)).current;
+  const reducedMotion = useReducedMotion();
 
   const handlePress = () => {
+    onToggle();
+    if (reducedMotion) return;
     Animated.sequence([
-      Animated.timing(blinkAnim, { toValue: 0.15, duration: 120, useNativeDriver: true }),
-      Animated.timing(blinkAnim, { toValue: 1, duration: 120, useNativeDriver: true }),
-      Animated.timing(blinkAnim, { toValue: 0.15, duration: 120, useNativeDriver: true }),
-      Animated.timing(blinkAnim, { toValue: 1, duration: 120, useNativeDriver: true }),
-      Animated.timing(blinkAnim, { toValue: 0.15, duration: 120, useNativeDriver: true }),
-      Animated.timing(blinkAnim, { toValue: 1, duration: 120, useNativeDriver: true }),
-    ]).start(() => {
-      onToggle();
-    });
+      Animated.timing(blinkAnim, { toValue: 0.45, duration: 90, useNativeDriver: true }),
+      Animated.spring(blinkAnim, { toValue: 1, useNativeDriver: true, ...SPRING.snap }),
+    ]).start();
   };
 
+  const springTo = (toValue: number) =>
+    Animated.spring(scale, { toValue, useNativeDriver: true, ...SPRING.press }).start();
+
   return (
-    <Animated.View style={{ opacity: blinkAnim }}>
-      <TouchableOpacity 
+    <Animated.View style={{ opacity: blinkAnim, transform: [{ scale }] }}>
+      <TouchableOpacity
         style={[
           styles.bucketRow,
         ]}
         onPress={handlePress}
+        onPressIn={() => springTo(0.98)}
+        onPressOut={() => springTo(1)}
         activeOpacity={0.7}
       >
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -744,7 +850,7 @@ export default function App() {
     await pairPartner(partnerIdInput.trim());
   };
 
-  const { notes, isPartnerTyping, addNote, removeNote, toggleReaction } = useRealtimeNotes(coupleId, userId);
+  const { notes, isPartnerTyping, setTyping: setNoteTyping, addNote, removeNote, toggleReaction } = useRealtimeNotes(coupleId, userId);
   const { currentMood, partnerMood, partnerName, updateMood } = useMood(coupleId, userId);
   const { todos, addTodo, toggleTodo, deleteTodo } = useTodos(coupleId, userId);
   const { records, predictions, addPeriodLog, refreshPeriods } = usePeriods(coupleId);
@@ -798,22 +904,96 @@ export default function App() {
     }
   }, [profile]);
 
-  const toggleDrawer = (open: boolean) => {
-    if (open) {
-      setIsDrawerOpen(true);
-      Animated.timing(drawerAnim, {
-        toValue: 1,
-        duration: 250,
-        useNativeDriver: true,
-      }).start();
-    } else {
-      Animated.timing(drawerAnim, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }).start(() => setIsDrawerOpen(false));
-    }
+  /**
+   * Open/close the drawer on a spring rather than a fixed 250ms curve.
+   *
+   * `velocity` is the finger's speed at release, in progress-units/second
+   * (see DRAWER_WIDTH below). Handing it to the spring is what removes the seam
+   * between dragging and animating: without it the panel stops dead at release
+   * and restarts from zero, and you feel the handoff as a hitch even though
+   * both halves are individually smooth.
+   */
+  const toggleDrawer = (open: boolean, velocity = 0) => {
+    if (open) setIsDrawerOpen(true);
+    Animated.spring(drawerAnim, {
+      toValue: open ? 1 : 0,
+      velocity,
+      useNativeDriver: true,
+      ...SPRING.sheet,
+    }).start(({ finished }) => {
+      // Only unmount when the close actually completed. A close interrupted by
+      // the user grabbing the panel again must not rip it off screen — the new
+      // gesture owns it now.
+      if (!open && finished) setIsDrawerOpen(false);
+    });
   };
+
+  // Live mirror of drawerAnim. A native-driven value's JS-side copy is only
+  // flushed when its animation ends, so a finger landing on a panel that is
+  // still moving has to ask a listener where the panel actually *is*. Starting
+  // the drag from the logical target instead is what makes a grabbed element
+  // jump — the one artifact that gives away a non-interruptible interface.
+  const drawerValue = useRef(0);
+  const drawerGrabbedAt = useRef(0);
+  useEffect(() => {
+    const id = drawerAnim.addListener(({ value }) => {
+      drawerValue.current = value;
+    });
+    return () => drawerAnim.removeListener(id);
+  }, [drawerAnim]);
+
+  // Swipe-to-close. Created once: everything it closes over is either a ref or
+  // a setState function, both stable for the life of the component, so the
+  // first-render closure behaves identically to any later one.
+  const drawerPan = useRef(
+    PanResponder.create({
+      // Taps must still reach the menu rows, so don't claim the gesture on
+      // touch-down. Claim it only once the finger has moved far enough to mean
+      // it (10px of hysteresis) and clearly horizontally — otherwise a slightly
+      // diagonal tap would swallow itself.
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_evt, g) =>
+        Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+      // Also claim it on the capture pass. A menu row becomes the responder the
+      // moment you touch it, and the bubble pass then has to negotiate it away;
+      // capturing means a drag that starts *on* a row still drags the panel
+      // instead of being eaten as a press. Nothing inside the drawer wants a
+      // horizontal gesture of its own, so there is nothing to steal from.
+      onMoveShouldSetPanResponderCapture: (_evt, g) =>
+        Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+
+      onPanResponderGrant: () => {
+        // Interrupt whatever was running and keep the on-screen position: the
+        // panel is now glued to the finger from exactly where it was caught.
+        drawerAnim.stopAnimation();
+        drawerGrabbedAt.current = drawerValue.current;
+      },
+
+      onPanResponderMove: (_evt, g) => {
+        // 1:1 with the finger, in progress units. Clamped rather than
+        // rubber-banded: the panel is pinned to the screen edge at either end,
+        // so there is genuinely nowhere further to go — resistance is for
+        // boundaries where movement is possible but exhausted, and faking it
+        // here would just open a gap along the edge.
+        const next = drawerGrabbedAt.current + g.dx / DRAWER_WIDTH;
+        drawerAnim.setValue(Math.max(0, Math.min(1, next)));
+      },
+
+      onPanResponderRelease: (_evt, g) => {
+        // PanResponder reports px/ms; projectMomentum wants px/s.
+        const pxPerSecond = g.vx * 1000;
+        // Decide on where the flick is *going*, not where the finger let go —
+        // that's what makes a quick flick close the drawer even from 80% open.
+        const projected =
+          drawerValue.current + projectMomentum(pxPerSecond) / DRAWER_WIDTH;
+        toggleDrawer(projected > 0.5, pxPerSecond / DRAWER_WIDTH);
+      },
+
+      // Gesture stolen by something else — settle back to open rather than
+      // stranding the panel mid-slide.
+      onPanResponderTerminate: () => toggleDrawer(true),
+    })
+  ).current;
 
   const handleSaveDisplayName = async () => {
     if (!tempDisplayName.trim()) {
@@ -858,7 +1038,7 @@ export default function App() {
   const [financeRenewalCycle, setFinanceRenewalCycle] = useState<'none' | 'monthly' | 'yearly'>('none');
 
   // Bucket list
-  const [bucketList, setBucketList] = useState<any[]>([]);
+  const [bucketList, setBucketList] = useState<BucketListItem[]>([]);
   const [newBucketTitle, setNewBucketTitle] = useState('');
   const [newBucketDescription, setNewBucketDescription] = useState('');
 
@@ -975,8 +1155,8 @@ export default function App() {
   const [hasUnseenUpdate, setHasUnseenUpdate] = useState(false);
 
   // Medical Record Vault
-  const [medLogs, setMedLogs] = useState<any[]>([]);
-  const [openMedLog, setOpenMedLog] = useState<any | null>(null); // detail modal
+  const [medLogs, setMedLogs] = useState<MedicalRecord[]>([]);
+  const [openMedLog, setOpenMedLog] = useState<MedicalRecord | null>(null); // detail modal
   const [hospitalDate, setHospitalDate] = useState('');
   const [hospitalReason, setHospitalReason] = useState('');
   const [hospitalResults, setHospitalResults] = useState('');
@@ -1411,11 +1591,20 @@ export default function App() {
     setHasUnseenUpdate(false);
   };
 
+  // Mirror the draft into the shared-notes typing indicator, so the partner's
+  // "Companion is active in shared notes..." line actually reflects something.
+  // The hook throttles the outgoing pings; we just report the current state.
+  const handleNoteDraftChange = (text: string) => {
+    setNewNoteContent(text);
+    setNoteTyping(text.trim().length > 0);
+  };
+
   const handleAddNote = async () => {
     const content = newNoteContent.trim();
     if (!content) return;
     // Clear the box immediately so it feels instant; restore if the send fails.
     setNewNoteContent('');
+    setNoteTyping(false);
     const success = await addNote(content);
     if (!success) setNewNoteContent(content);
   };
@@ -1679,8 +1868,13 @@ export default function App() {
     if (gfEnergy !== 'normal') symptomsArray.push(`energy:${gfEnergy}`);
 
     // Call predictions helper with serialized symptoms
-    await addPeriodLog(periodStartDate, periodEndDate.trim() || null, symptomsArray, null);
-    
+    const logged = await addPeriodLog(periodStartDate, periodEndDate.trim() || null, symptomsArray, null);
+    if (!logged) {
+      // Keep the form filled so the entry isn't lost to a dropped connection.
+      Alert.alert('Cycle not logged', 'NOVIA could not save this entry. Please check connectivity and try again.');
+      return;
+    }
+
     // Proactively refresh periods logs for real-time live prediction updates
     await refreshPeriods();
 
@@ -1708,7 +1902,9 @@ export default function App() {
         reason: hospitalReason.trim(),
         test_results: hospitalResults.trim(),
       },
-      record_date: hospitalDate ? new Date(hospitalDate).toISOString() : new Date().toISOString(),
+      // parseLocalDate, not new Date(str): 'YYYY-MM-DD' parses as UTC midnight,
+      // which reads back as the *previous* calendar day anywhere west of UTC.
+      record_date: hospitalDate ? parseLocalDate(hospitalDate).toISOString() : new Date().toISOString(),
       notes: hospitalResults.trim() || null,
     });
 
@@ -2245,7 +2441,7 @@ export default function App() {
 
                     {/* Companion Status Row */}
                     <FadeInUp index={0}>
-                    <View style={styles.partnerCard}>
+                    <GlassCard style={styles.partnerCard}>
                       <Text style={styles.sectionHeading}>COMPANION REAL-TIME TRACKING</Text>
                       <View style={styles.rowBetween}>
                         <Text style={styles.partnerName}>{partnerName}</Text>
@@ -2259,13 +2455,13 @@ export default function App() {
                       <View style={styles.suggestionContainer}>
                         <Text style={styles.welcomeCopy}>{relationshipAdvice}</Text>
                       </View>
-                    </View>
+                    </GlassCard>
                     </FadeInUp>
 
                     {/* Step Duel — daily step competition. Own steps come from
                         Health Connect; partner steps are placeholder until sync. */}
                     <FadeInUp index={1}>
-                    <View style={styles.sectionCard}>
+                    <GlassCard style={styles.sectionCard}>
                       <View style={styles.rowBetween}>
                         <Text style={styles.sectionHeading}>STEP DUEL</Text>
                         <Footprints size={16} color={THEME.colors.primary} />
@@ -2397,13 +2593,13 @@ export default function App() {
                           )}
                         </>
                       )}
-                    </View>
+                    </GlassCard>
                     </FadeInUp>
 
                     {/* On this day — milestones landing today, then upcoming ones. */}
                     {(todayMilestones.length > 0 || upcomingMilestones.length > 0) && (
                       <FadeInUp index={1}>
-                      <View style={styles.sectionCard}>
+                      <GlassCard style={styles.sectionCard} blur={false}>
                         <View style={styles.rowBetween}>
                           <Text style={styles.sectionHeading}>ON THIS DAY</Text>
                           <CalendarHeart size={16} color="#0E9594" />
@@ -2437,13 +2633,13 @@ export default function App() {
                         <TouchableOpacity onPress={() => setActiveTab('milestones')} style={styles.onThisDayManage}>
                           <Text style={styles.onThisDayManageText}>Manage milestones</Text>
                         </TouchableOpacity>
-                      </View>
+                      </GlassCard>
                       </FadeInUp>
                     )}
 
                     {/* Daily check-in / gratitude with partner-visible streaks. */}
                     <FadeInUp index={2}>
-                    <View style={styles.sectionCard}>
+                    <GlassCard style={styles.sectionCard} blur={false}>
                       <View style={styles.rowBetween}>
                         <Text style={styles.sectionHeading}>DAILY CHECK-IN</Text>
                         <View style={styles.streakPill}>
@@ -2496,7 +2692,7 @@ export default function App() {
                           <Text style={styles.streakPillText}>{partnerStreak}d</Text>
                         </View>
                       </View>
-                    </View>
+                    </GlassCard>
                     </FadeInUp>
 
                     {/* Compact cycle snapshot — tap through to the full tracker. */}
@@ -2589,7 +2785,7 @@ export default function App() {
                       const w = getWordOfDay();
                       return (
                         <FadeInUp index={3}>
-                        <View style={styles.sectionCard}>
+                        <GlassCard style={styles.sectionCard} blur={false}>
                           <View style={styles.rowBetween}>
                             <Text style={styles.sectionHeading}>WORD OF THE DAY</Text>
                             <BookOpen size={16} color="#0E9594" />
@@ -2597,14 +2793,14 @@ export default function App() {
                           <Text style={styles.vocabWord}>{w.word}</Text>
                           <Text style={styles.vocabMeaning}>{w.meaning}</Text>
                           {w.example ? <Text style={styles.vocabExample}>“{w.example}”</Text> : null}
-                        </View>
+                        </GlassCard>
                         </FadeInUp>
                       );
                     })()}
 
                     {/* Mood Selector Updates */}
                     <FadeInUp index={4}>
-                    <View style={styles.sectionCard}>
+                    <GlassCard style={styles.sectionCard} blur={false}>
                       <Text style={styles.sectionHeading}>UPDATE MY EMOTIONAL CAPACITY</Text>
                       <View style={styles.moodRow}>
                         {['Happy', 'Overwhelmed', 'Exhausted', 'Low Energy'].map((m) => (
@@ -2620,7 +2816,7 @@ export default function App() {
                           </TouchableOpacity>
                         ))}
                       </View>
-                    </View>
+                    </GlassCard>
                     </FadeInUp>
                   </View>
                 )}
@@ -2628,21 +2824,22 @@ export default function App() {
                 {/* Collaborative Canvas Tab */}
                 {activeTab === 'notes' && (
                   <View style={styles.tabContent}>
-                    <View style={styles.sectionCard}>
+                    <GlassCard style={styles.sectionCard} blur={false}>
                       <Text style={styles.sectionHeading}>SHARED NOTES</Text>
                       <TextInput
                         multiline
                         textAlignVertical="top"
                         style={[styles.input, styles.noteInput]}
                         value={newNoteContent}
-                        onChangeText={setNewNoteContent}
+                        onChangeText={handleNoteDraftChange}
+                        onBlur={() => setNoteTyping(false)}
                         placeholder="Write a note for both partners..."
                         placeholderTextColor="#2B2F44"
                       />
                       <SubmitButton style={styles.primaryButton} onPress={handleAddNote}>
                         <Text style={styles.primaryBtnText}>Add Shared Note</Text>
                       </SubmitButton>
-                    </View>
+                    </GlassCard>
 
                     <View style={styles.noteGrid}>
                       {notes.length === 0 ? (
@@ -2693,7 +2890,7 @@ export default function App() {
                       <Text style={styles.backRowText}>Hub</Text>
                     </TouchableOpacity>
 
-                    <View style={styles.sectionCard}>
+                    <GlassCard style={styles.sectionCard} blur={false}>
                       <Text style={styles.sectionHeading}>NEW SHARED TODO</Text>
                       <TextInput
                         style={styles.input}
@@ -2770,9 +2967,9 @@ export default function App() {
                       <SubmitButton style={[styles.primaryButton, { marginTop: 16 }]} onPress={handleAddTodo}>
                         <Text style={styles.primaryBtnText}>ADD TODO</Text>
                       </SubmitButton>
-                    </View>
+                    </GlassCard>
 
-                    <View style={styles.sectionCard}>
+                    <GlassCard style={styles.sectionCard} blur={false}>
                       <Text style={styles.sectionHeading}>SHARED TODOS</Text>
                       {todos.length === 0 ? (
                         <Text style={styles.noRemindersText}>No todos yet. Add one above — you'll both be reminded.</Text>
@@ -2803,7 +3000,7 @@ export default function App() {
                           );
                         })
                       )}
-                    </View>
+                    </GlassCard>
                     <View style={{ height: 100 }} />
                   </View>
                 )}
@@ -2816,7 +3013,7 @@ export default function App() {
                       <Text style={styles.backRowText}>Hub</Text>
                     </TouchableOpacity>
 
-                    <View style={styles.sectionCard}>
+                    <GlassCard style={styles.sectionCard} blur={false}>
                       <Text style={styles.sectionHeading}>NEW MILESTONE</Text>
                       <TextInput
                         style={styles.input}
@@ -2871,9 +3068,9 @@ export default function App() {
                       <SubmitButton style={[styles.primaryButton, { marginTop: 16 }]} onPress={handleAddMilestone}>
                         <Text style={styles.primaryBtnText}>ADD MILESTONE</Text>
                       </SubmitButton>
-                    </View>
+                    </GlassCard>
 
-                    <View style={styles.sectionCard}>
+                    <GlassCard style={styles.sectionCard} blur={false}>
                       <Text style={styles.sectionHeading}>SHARED MILESTONES</Text>
                       {milestones.length === 0 ? (
                         <Text style={styles.noRemindersText}>No milestones yet. Add your first date or anniversary — you'll both get an "On this day" reminder.</Text>
@@ -2903,7 +3100,7 @@ export default function App() {
                           );
                         })
                       )}
-                    </View>
+                    </GlassCard>
                     <View style={{ height: 100 }} />
                   </View>
                 )}
@@ -2924,7 +3121,7 @@ export default function App() {
                       if (!c) return <Text style={styles.noRemindersText}>This complaint was removed.</Text>;
                       const thread = repliesFor(c.id);
                       return (
-                        <View style={styles.sectionCard}>
+                        <GlassCard style={styles.sectionCard} blur={false}>
                           <View style={styles.rowBetween}>
                             <Text style={[styles.sectionHeading, { flex: 1 }]}>{c.title}</Text>
                             <View style={[styles.statusChip, { backgroundColor: c.status === 'resolved' ? 'rgba(14, 149, 148,0.18)' : 'rgba(14, 149, 148,0.18)' }]}>
@@ -2977,11 +3174,11 @@ export default function App() {
                               </TouchableOpacity>
                             ) : null}
                           </View>
-                        </View>
+                        </GlassCard>
                       );
                     })() : (
                       <>
-                        <View style={styles.sectionCard}>
+                        <GlassCard style={styles.sectionCard} blur={false}>
                           <Text style={styles.sectionHeading}>FILE A COMPLAINT</Text>
                           <TextInput
                             style={styles.input}
@@ -3001,9 +3198,9 @@ export default function App() {
                           <SubmitButton style={styles.primaryButton} onPress={handleAddComplaint}>
                             <Text style={styles.primaryBtnText}>SUBMIT COMPLAINT</Text>
                           </SubmitButton>
-                        </View>
+                        </GlassCard>
 
-                        <View style={styles.sectionCard}>
+                        <GlassCard style={styles.sectionCard} blur={false}>
                           <Text style={styles.sectionHeading}>COMPLAINT TICKETS</Text>
                           {complaints.length === 0 ? (
                             <Text style={styles.noRemindersText}>No complaints. All is well.</Text>
@@ -3023,7 +3220,7 @@ export default function App() {
                               </TouchableOpacity>
                             );
                           })}
-                        </View>
+                        </GlassCard>
                       </>
                     )}
                     <View style={{ height: 100 }} />
@@ -3075,7 +3272,7 @@ export default function App() {
                   return (
                     <View style={styles.tabContent}>
                       {/* Proportional Spend Analytics Dashboard */}
-                      <View style={styles.sectionCard}>
+                      <GlassCard style={styles.sectionCard} blur={false}>
                         <Text style={styles.sectionHeading}>SPEND ANALYSIS &amp; LEDGER COMPARISON</Text>
                         
                         <View style={styles.analyticsCombinedRow}>
@@ -3133,7 +3330,7 @@ export default function App() {
                             to include them in the settlement.
                           </Text>
                         )}
-                      </View>
+                      </GlassCard>
 
                       {/* Net Settlement Ledger Card */}
                       {(() => {
@@ -3175,7 +3372,7 @@ export default function App() {
 
                       {/* Subscription Forecast Card */}
                       {activeSubscriptionCount > 0 && (
-                        <View style={styles.subscriptionForecastCard}>
+                        <GlassCard style={styles.subscriptionForecastCard} blur={false}>
                           <Text style={styles.sectionHeading}>RECURRING SUBSCRIPTION FORECAST</Text>
                           <Text style={[styles.predText, { fontSize: 13, marginBottom: 8 }]}>
                             Tracked Subscriptions: <Text style={{ color: THEME.colors.primary, fontFamily: FONTS.bold }}>{activeSubscriptionCount}</Text>
@@ -3191,10 +3388,10 @@ export default function App() {
                           <Text style={styles.progressSubLabel}>
                             Yearly plans are shown as their monthly equivalent.
                           </Text>
-                        </View>
+                        </GlassCard>
                       )}
 
-                      <View style={styles.sectionCard}>
+                      <GlassCard style={styles.sectionCard} blur={false}>
                         <Text style={styles.sectionHeading}>LOG BORROWINGS &amp; SUBSCRIPTIONS</Text>
                         <TextInput
                           style={styles.input}
@@ -3311,7 +3508,7 @@ export default function App() {
                         <SubmitButton style={styles.primaryButton} onPress={handleAddFinance}>
                           <Text style={styles.primaryBtnText}>Log Financial Item</Text>
                         </SubmitButton>
-                      </View>
+                      </GlassCard>
 
                       <Text style={styles.sectionTitle}>Shared Finance Ledger</Text>
                       {financeItems.length === 0 ? (
@@ -3439,7 +3636,7 @@ export default function App() {
                       );
                     })()}
 
-                    <View style={styles.sectionCard}>
+                    <GlassCard style={styles.sectionCard} blur={false}>
                       <Text style={styles.sectionHeading}>HOSPITAL VISIT LOG</Text>
                       <Text style={styles.inputLabel}>VISIT DATE</Text>
                       <TouchableOpacity 
@@ -3469,7 +3666,7 @@ export default function App() {
                       <SubmitButton style={styles.primaryButton} onPress={logHospitalVisit}>
                         <Text style={styles.primaryBtnText}>Save Hospital Visit</Text>
                       </SubmitButton>
-                    </View>
+                    </GlassCard>
 
                     <Text style={styles.sectionTitle}>Hospital Visit History</Text>
                     {medLogs.length === 0 && (
@@ -3502,7 +3699,7 @@ export default function App() {
                       <ChevronLeft size={20} color="#0E9594" />
                       <Text style={styles.backRowText}>Hub</Text>
                     </TouchableOpacity>
-                    <View style={styles.sectionCard}>
+                    <GlassCard style={styles.sectionCard} blur={false}>
                       <Text style={styles.sectionHeading}>ADD EXPERIENCES GOAL</Text>
                       <TextInput
                         style={styles.input}
@@ -3523,7 +3720,7 @@ export default function App() {
                       <SubmitButton style={styles.primaryButton} onPress={handleAddBucket}>
                         <Text style={styles.primaryBtnText}>Add experience to list</Text>
                       </SubmitButton>
-                    </View>
+                    </GlassCard>
 
                     <Text style={styles.sectionTitle}>Our Aspirations Checklist</Text>
                     {bucketList.length === 0 ? (
@@ -3583,7 +3780,7 @@ export default function App() {
             }}
           >
             <View style={styles.calendarModalOverlay}>
-              <View style={styles.calendarModalContent}>
+              <GlassCard style={styles.calendarModalContent} tier="chrome" radius={24}>
                 <Text style={styles.calendarModalTitle}>
                   SELECT {calendarTarget === 'periodStartDate' ? 'START DATE' :
                           calendarTarget === 'periodEndDate' ? 'END DATE' :
@@ -3626,34 +3823,53 @@ export default function App() {
                 >
                   <Text style={styles.calendarCloseBtnText}>CANCEL</Text>
                 </TouchableOpacity>
-              </View>
+              </GlassCard>
             </View>
           </Modal>
 
           {/* Sliding Side Drawer Overlay */}
           {isDrawerOpen && (
             <View style={styles.drawerBackdrop}>
-              <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.6)', opacity: drawerAnim }]}>
-                <TouchableOpacity 
-                  style={{ flex: 1 }} 
-                  activeOpacity={1} 
-                  onPress={() => toggleDrawer(false)} 
+              {/* The scrim opacity is driven by the same value as the panel, so
+                  it dims continuously *during* the drag rather than snapping at
+                  the end — the background receding under your finger is what
+                  tells you how far along the gesture is. */}
+              <Animated.View
+                style={[
+                  StyleSheet.absoluteFill,
+                  {
+                    backgroundColor: 'rgba(0,0,0,0.6)',
+                    opacity: drawerAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, 1],
+                      extrapolate: 'clamp',
+                    }),
+                  },
+                ]}
+              >
+                <TouchableOpacity
+                  style={{ flex: 1 }}
+                  activeOpacity={1}
+                  onPress={() => toggleDrawer(false)}
                 />
               </Animated.View>
 
-              <Animated.View 
+              <Animated.View
+                {...drawerPan.panHandlers}
                 style={[
                   styles.drawerPanel,
                   {
                     transform: [{
                       translateX: drawerAnim.interpolate({
                         inputRange: [0, 1],
-                        outputRange: [-280, 0]
+                        outputRange: [-DRAWER_WIDTH, 0],
+                        extrapolate: 'clamp',
                       })
                     }]
                   }
                 ]}
               >
+                <GlassBacking radius={0} tier="chrome" />
                 <View style={styles.drawerProfileSection}>
                   <View style={styles.drawerAvatar}>
                     <Text style={styles.drawerAvatarText}>
@@ -3749,7 +3965,7 @@ export default function App() {
             onRequestClose={() => setIsSettingsVisible(false)}
           >
             <View style={styles.settingsModalOverlay}>
-              <View style={styles.settingsModalContent}>
+              <GlassCard style={styles.settingsModalContent} tier="chrome" radius={24}>
                 <View style={styles.settingsHeader}>
                   <Text style={styles.settingsTitle}>ACCOUNT &amp; PAIRING</Text>
                   <TouchableOpacity onPress={() => setIsSettingsVisible(false)}>
@@ -3814,7 +4030,7 @@ export default function App() {
                     </View>
                   )}
                 </ScrollView>
-              </View>
+              </GlassCard>
             </View>
           </Modal>
 
@@ -3826,7 +4042,7 @@ export default function App() {
             onRequestClose={() => setStakesModalOpen(false)}
           >
             <View style={styles.settingsModalOverlay}>
-              <View style={styles.settingsModalContent}>
+              <GlassCard style={styles.settingsModalContent} tier="chrome" radius={24}>
                 <View style={styles.settingsHeader}>
                   <Text style={styles.settingsTitle}>SEASON STAKES</Text>
                   <TouchableOpacity onPress={() => setStakesModalOpen(false)}>
@@ -3857,7 +4073,7 @@ export default function App() {
                     <Text style={styles.settingsSaveBtnText}>SAVE STAKES</Text>
                   </SubmitButton>
                 </View>
-              </View>
+              </GlassCard>
             </View>
           </Modal>
 
@@ -3869,7 +4085,7 @@ export default function App() {
             onRequestClose={() => setIsCycleModalVisible(false)}
           >
             <View style={styles.settingsModalOverlay}>
-              <View style={styles.settingsModalContent}>
+              <GlassCard style={styles.settingsModalContent} tier="chrome" radius={24}>
                 <View style={styles.settingsHeader}>
                   <Text style={styles.settingsTitle}>CYCLE TRACKER</Text>
                   <TouchableOpacity onPress={() => setIsCycleModalVisible(false)}>
@@ -3895,7 +4111,7 @@ export default function App() {
                       </TouchableOpacity>
 
                       <Text style={styles.inputLabel}>GIRLFRIEND SYMPTOMS QUESTIONNAIRE</Text>
-                      <View style={styles.questionnaireCard}>
+                      <GlassCard style={styles.questionnaireCard} blur={false}>
                         <Text style={styles.questionTitle}>1. Bleeding / Flow</Text>
                         <View style={styles.optionsRow}>
                           {(['none', 'spotting', 'light', 'heavy'] as const).map((opt) => (
@@ -3940,7 +4156,7 @@ export default function App() {
                             </TouchableOpacity>
                           ))}
                         </View>
-                      </View>
+                      </GlassCard>
 
                       <SubmitButton style={styles.primaryButton} onPress={handleAddPeriodLog}>
                         <Text style={styles.primaryBtnText}>Save Cycle Data</Text>
@@ -4069,7 +4285,7 @@ export default function App() {
                     })()
                   )}
                 </ScrollView>
-              </View>
+              </GlassCard>
             </View>
           </Modal>
 
@@ -4081,7 +4297,7 @@ export default function App() {
             onRequestClose={() => setIsChangelogVisible(false)}
           >
             <View style={styles.settingsModalOverlay}>
-              <View style={styles.settingsModalContent}>
+              <GlassCard style={styles.settingsModalContent} tier="chrome" radius={24}>
                 <View style={styles.settingsHeader}>
                   <Text style={styles.settingsTitle}>CHANGELOG</Text>
                   <TouchableOpacity onPress={() => setIsChangelogVisible(false)}>
@@ -4109,7 +4325,7 @@ export default function App() {
                   )}
                   <View style={{ height: 24 }} />
                 </ScrollView>
-              </View>
+              </GlassCard>
             </View>
           </Modal>
 
@@ -4121,7 +4337,7 @@ export default function App() {
             onRequestClose={() => setOpenMedLog(null)}
           >
             <View style={styles.settingsModalOverlay}>
-              <View style={styles.settingsModalContent}>
+              <GlassCard style={styles.settingsModalContent} tier="chrome" radius={24}>
                 <View style={styles.settingsHeader}>
                   <Text style={styles.settingsTitle}>HOSPITAL VISIT</Text>
                   <TouchableOpacity onPress={() => setOpenMedLog(null)}>
@@ -4146,7 +4362,7 @@ export default function App() {
                   )}
                   <View style={{ height: 24 }} />
                 </ScrollView>
-              </View>
+              </GlassCard>
             </View>
           </Modal>
         </View>
@@ -4171,12 +4387,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   card: {
-    backgroundColor: THEME.glass.surface,
+    ...THEME.material.regular,
     padding: THEME.spacing.lg,
     borderRadius: THEME.borderRadius.lg,
     width: '100%',
     marginTop: THEME.spacing.xl,
-    ...THEME.shadow.lifted,
   },
   cardTitle: {
     fontSize: 22,
@@ -4242,11 +4457,10 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.body,
   },
   partnerCard: {
-    backgroundColor: THEME.glass.surface,
+    ...THEME.material.regular,
     padding: THEME.spacing.md,
     borderRadius: THEME.borderRadius.md,
     marginBottom: THEME.spacing.md,
-    ...THEME.shadow.soft,
   },
   sectionHeading: {
     fontSize: 15,
@@ -4283,11 +4497,10 @@ const styles = StyleSheet.create({
     marginTop: THEME.spacing.sm,
   },
   sectionCard: {
-    backgroundColor: THEME.glass.surface,
+    ...THEME.material.regular,
     padding: THEME.spacing.md,
     borderRadius: THEME.borderRadius.md,
     marginBottom: THEME.spacing.md,
-    ...THEME.shadow.soft,
   },
 
   // --- Step Duel card ---
@@ -4412,10 +4625,10 @@ const styles = StyleSheet.create({
     color: THEME.colors.textFaint,
   },
   stakesRow: {
+    ...THEME.material.well,
     marginTop: 16,
     padding: 12,
     borderRadius: THEME.borderRadius.sm,
-    backgroundColor: THEME.glass.inset,
   },
   stakesLabel: {
     fontSize: 11,
@@ -4502,12 +4715,11 @@ const styles = StyleSheet.create({
 
   // --- Home-screen cycle snapshot ---
   cycleMiniCard: {
-    backgroundColor: THEME.glass.surface,
+    ...THEME.material.regular,
     padding: THEME.spacing.md,
     borderRadius: THEME.borderRadius.md,
     marginBottom: THEME.spacing.md,
     overflow: 'hidden', // clips the Shimmer sweep to the card's rounded corners
-    ...THEME.shadow.soft,
   },
   cyclePhasePill: {
     paddingHorizontal: 10,
@@ -4642,9 +4854,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   cycleDateBox: {
+    ...THEME.material.well,
     flexGrow: 1,
     flexBasis: '46%',
-    backgroundColor: THEME.glass.surface,
     borderRadius: THEME.borderRadius.md,
     padding: 12,
   },
@@ -4685,8 +4897,8 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.semibold,
   },
   input: {
+    ...THEME.material.well,
     fontFamily: FONTS.body,
-    backgroundColor: THEME.glass.inset,
     color: '#EDEDF4',
     borderRadius: THEME.borderRadius.md,
     paddingHorizontal: THEME.spacing.md,
@@ -4717,13 +4929,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   noteCard: {
-    backgroundColor: THEME.glass.surface,
+    ...THEME.material.regular,
     borderRadius: THEME.borderRadius.md,
     padding: THEME.spacing.md,
     width: '48%',
     marginBottom: THEME.spacing.md,
     minHeight: 128,
-    ...THEME.shadow.soft,
   },
   noteAuthor: {
     color: THEME.colors.primary,
@@ -4788,9 +4999,9 @@ const styles = StyleSheet.create({
     marginBottom: THEME.spacing.md,
   },
   spinnerPanel: {
+    ...THEME.material.regular,
     flex: 1,
     alignItems: 'center',
-    backgroundColor: THEME.glass.inset,
     borderRadius: THEME.borderRadius.md,
     padding: THEME.spacing.sm,
   },
@@ -4892,14 +5103,13 @@ const styles = StyleSheet.create({
     ...THEME.shadow.soft,
   },
   financeCard: {
-    backgroundColor: THEME.glass.surface,
+    ...THEME.material.regular,
     padding: THEME.spacing.md,
     borderRadius: THEME.borderRadius.md,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: THEME.spacing.sm,
-    ...THEME.shadow.soft,
   },
   financeName: {
     fontSize: 15,
@@ -4940,7 +5150,7 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.semibold,
   },
   vaultRow: {
-    backgroundColor: THEME.glass.surface,
+    ...THEME.material.well,
     borderRadius: THEME.borderRadius.sm,
     marginBottom: THEME.spacing.xs,
     padding: THEME.spacing.md,
@@ -4989,11 +5199,10 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   bucketRow: {
-    backgroundColor: THEME.glass.surface,
+    ...THEME.material.well,
     padding: THEME.spacing.md,
     borderRadius: THEME.borderRadius.sm,
     marginBottom: THEME.spacing.sm,
-    ...THEME.shadow.soft,
   },
   bucketText: {
     color: '#EDEDF4',
@@ -5013,10 +5222,14 @@ const styles = StyleSheet.create({
     color: THEME.colors.textMuted,
   },
   tabBar: {
+    ...THEME.material.chrome,
     flexDirection: 'row',
-    // Near-opaque: at 0.82 the screen content behind the glass bled through as a
-    // faint dark line under the active icon. Solid slate removes it.
-    backgroundColor: 'rgba(30, 32, 48, 0.98)',
+    // No explicit fill: GlassBacking owns the material here, and an opaque
+    // background on this view would paint behind the BlurView and leave it
+    // nothing of the screen to sample. The old near-opaque slate existed to
+    // stop content bleeding through as a faint line under the active icon —
+    // a real blur solves that properly rather than by hiding it.
+    backgroundColor: 'transparent',
     borderRadius: 34,
     position: 'absolute',
     // `bottom` is set dynamically (TAB_BAR_BOTTOM) on the element itself.
@@ -5107,7 +5320,7 @@ const styles = StyleSheet.create({
     marginBottom: THEME.spacing.xs,
   },
   userIdContainer: {
-    backgroundColor: THEME.glass.inset,
+    ...THEME.material.well,
     borderRadius: THEME.borderRadius.md,
     padding: THEME.spacing.md,
     width: '100%',
@@ -5295,13 +5508,12 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   reminderItemRow: {
+    ...THEME.material.well,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: THEME.glass.surface,
     paddingHorizontal: THEME.spacing.md,
     paddingVertical: 14,
     borderRadius: THEME.borderRadius.md,
-    ...THEME.shadow.soft,
   },
   reminderCheckbox: {
     width: 24,
@@ -5334,12 +5546,11 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   calendarModalContent: {
+    ...THEME.material.chrome,
     width: '100%',
     maxWidth: 340,
-    backgroundColor: 'rgba(38, 42, 64, 0.94)',
     borderRadius: 24,
     padding: 18,
-    ...THEME.shadow.lifted,
   },
   calendarModalTitle: {
     fontSize: 12,
@@ -5378,11 +5589,10 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.semibold,
   },
   questionnaireCard: {
-    backgroundColor: THEME.glass.surface,
+    ...THEME.material.regular,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
-    ...THEME.shadow.soft,
   },
   questionTitle: {
     color: '#E0A458',
@@ -5436,18 +5646,16 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   settlementCard: {
-    backgroundColor: THEME.glass.surface,
+    ...THEME.material.regular,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
-    ...THEME.shadow.soft,
   },
   subscriptionForecastCard: {
-    backgroundColor: THEME.glass.surface,
+    ...THEME.material.regular,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
-    ...THEME.shadow.soft,
   },
   floatingMenuButton: {
     position: 'absolute',
@@ -5476,12 +5684,19 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     left: 0,
-    width: 280,
-    backgroundColor: 'rgba(30, 32, 48, 0.96)',
+    width: DRAWER_WIDTH,
+    ...THEME.material.chrome,
+    // GlassBacking owns the fill (see tabBar), so this stays out of its way.
+    backgroundColor: 'transparent',
+    // The rim reads as the lit edge of the panel against the dimmed screen, so
+    // it belongs on the side facing the content, not all the way around a pane
+    // that runs off three edges of the display.
+    borderWidth: 0,
+    borderRightWidth: 1,
+    borderRightColor: THEME.rim.edge,
     paddingTop: Platform.OS === 'ios' ? 60 : 40,
     paddingHorizontal: 20,
     zIndex: 1000,
-    shadowColor: '#000',
     shadowOffset: { width: 8, height: 0 },
     shadowOpacity: 0.45,
     shadowRadius: 24,
@@ -5582,12 +5797,11 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   settingsModalContent: {
+    ...THEME.material.chrome,
     width: '100%',
     maxWidth: 360,
-    backgroundColor: 'rgba(30, 32, 48, 0.95)',
     borderRadius: 24,
     padding: 22,
-    ...THEME.shadow.lifted,
   },
   settingsHeader: {
     flexDirection: 'row',
@@ -5618,8 +5832,8 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   settingsInput: {
+    ...THEME.material.well,
     fontFamily: FONTS.body,
-    backgroundColor: THEME.glass.inset,
     borderRadius: 12,
     color: '#EDEDF4',
     paddingHorizontal: 14,
@@ -5680,14 +5894,13 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   navCard: {
+    ...THEME.material.well,
     width: '48%',
-    backgroundColor: THEME.glass.inset,
     borderRadius: THEME.borderRadius.md,
     paddingVertical: 22,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
-    ...THEME.shadow.soft,
   },
   navCardLabel: {
     color: '#F4F5FA',
@@ -5851,9 +6064,9 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   ticketRow: {
+    ...THEME.material.regular,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: THEME.glass.inset,
     borderRadius: 14,
     padding: 14,
     marginTop: 10,
@@ -5890,7 +6103,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   updateEntry: {
-    backgroundColor: THEME.glass.inset,
+    ...THEME.material.regular,
     borderRadius: 12,
     padding: 12,
     marginTop: 10,
