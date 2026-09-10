@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, View, ViewStyle } from 'react-native';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
-import { THEME } from '../../constants/theme';
+import { alpha, THEME } from '../../constants/theme';
 
 /**
  * Glossy glass.
@@ -63,9 +63,11 @@ export type GlassTier = 'regular' | 'thick' | 'chrome';
  * from what's behind, and keeping the old fill would just look muddy.
  */
 const BLURRED: Record<GlassTier, { intensity: number; tint: string }> = {
-  regular: { intensity: 42, tint: 'rgba(237, 237, 244, 0.055)' },
-  thick: { intensity: 55, tint: 'rgba(237, 237, 244, 0.085)' },
-  chrome: { intensity: 70, tint: 'rgba(24, 26, 40, 0.52)' },
+  regular: { intensity: 42, tint: alpha(THEME.ink[95], 0.055) },
+  thick: { intensity: 55, tint: alpha(THEME.ink[95], 0.085) },
+  // Chrome is a darkened veil of the app's own ground, not an ink tint — that
+  // is what keeps it reading as structure sitting *under* the content.
+  chrome: { intensity: 70, tint: alpha(THEME.colors.background, 0.52) },
 };
 
 /**
@@ -117,6 +119,11 @@ export function GlassBacking({
         </>
       ) : null}
 
+      {/* The highlights below stay literal white on purpose: a specular
+          reflection is the colour of the light source, not of the material.
+          Tinting them with the accent would read as coloured plastic rather
+          than glass — so they are the one place in the app that must NOT
+          follow the palette. */}
       {gloss && (
         <Svg width="100%" height="100%">
           <Defs>

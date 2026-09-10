@@ -59,8 +59,49 @@ export const FONTS = {
   heavy: 'Manrope_800ExtraBold',
 } as const;
 
+/**
+ * The ink ramp — every neutral in the app, named by weight.
+ *
+ * These eight values were previously scattered through App.tsx as ~120 raw hex
+ * literals (`#8B90A4`, `#5A6078`, `#F4F5FA`…) with no names and no system, so
+ * there was no way to restyle the app without a find-and-replace, and no way to
+ * tell which greys were deliberate and which were drift.
+ *
+ * The number is roughly the perceived lightness against the app's ground, so
+ * `ink[95]` is body copy and `ink[35]` is a placeholder. Pick by role, not by
+ * eye: text you must read is 70 or above, text you may ignore is 50 or below.
+ */
+export const INK = {
+  100: '#F4F5FA', // emphasis — brighter than body, used sparingly
+  95: '#EDEDF4', // primary text
+  70: '#C6CAD6', // secondary text
+  55: '#9AA0B6',
+  50: '#8B90A4', // muted / metadata
+  35: '#5A6078', // placeholder text
+  22: '#3A3F55',
+  16: '#2B2F44', // hairlines, barely-there fills
+  0: '#000000',
+} as const;
+
+/**
+ * `rgba()` from a 6-digit hex plus an alpha.
+ *
+ * Tints used to be written as raw `rgba(14, 149, 148, 0.18)`, which hard-codes
+ * the *hue* at the call site — so a palette change silently leaves a trail of
+ * the old accent behind in every tint. Deriving them from a token means the
+ * palette stays the single source of truth.
+ */
+export function alpha(hex: string, a: number): string {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
+
 export const THEME = {
   fonts: FONTS,
+  ink: INK,
   colors: {
     background: PALETTE.forestDeep,
     surface: 'rgba(237, 237, 244, 0.06)',   // paper-tinted glass

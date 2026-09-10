@@ -69,7 +69,7 @@ import { Manrope_500Medium } from '@expo-google-fonts/manrope/500Medium';
 import { Manrope_600SemiBold } from '@expo-google-fonts/manrope/600SemiBold';
 import { Manrope_700Bold } from '@expo-google-fonts/manrope/700Bold';
 import { Manrope_800ExtraBold } from '@expo-google-fonts/manrope/800ExtraBold';
-import { FONTS, PALETTE, THEME } from './src/constants/theme';
+import { alpha, FONTS, PALETTE, THEME } from './src/constants/theme';
 import { SPRING, projectMomentum } from './src/constants/motion';
 import { useReducedMotion } from './src/hooks/useReducedMotion';
 
@@ -452,7 +452,7 @@ function Shimmer({ delay = 0, period = 5200 }: { delay?: number; period?: number
             top: -size.height,
             bottom: -size.height,
             width: band,
-            backgroundColor: 'rgba(237, 237, 244, 0.07)',
+            backgroundColor: alpha(THEME.ink[95], 0.07),
             transform: [
               {
                 translateX: anim.interpolate({
@@ -696,7 +696,7 @@ function AnimatedTabBar<T extends string>({
           >
             <Icon
               size={24}
-              color={isActive ? '#0E9594' : 'rgba(237, 237, 244,0.55)'}
+              color={isActive ? THEME.colors.primary : alpha(THEME.ink[95], 0.55)}
               strokeWidth={isActive ? 2.5 : 2}
             />
           </PressableScale>
@@ -748,9 +748,9 @@ const BlinkingBucketRow = ({ item, getCreatorName, onToggle, onDelete }: { item:
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, paddingRight: 8 }}>
             {item.is_completed ? (
-              <CheckSquare size={18} color="#0E9594" strokeWidth={2} />
+              <CheckSquare size={18} color={THEME.colors.primary} strokeWidth={2} />
             ) : (
-              <Square size={18} color="rgba(237, 237, 244,0.5)" strokeWidth={2} />
+              <Square size={18} color={alpha(THEME.ink[95], 0.5)} strokeWidth={2} />
             )}
             <Text style={[styles.bucketText, item.is_completed && styles.strikethrough, { marginLeft: 8 }]}>
               {item.title}
@@ -767,12 +767,12 @@ const BlinkingBucketRow = ({ item, getCreatorName, onToggle, onDelete }: { item:
                 width: 26,
                 height: 26,
                 borderRadius: 13,
-                backgroundColor: 'rgba(242, 71, 34, 0.16)',
+                backgroundColor: alpha(THEME.colors.danger, 0.16),
                 alignItems: 'center',
                 justifyContent: 'center',
               }}
             >
-              <X size={12} color="#F24722" strokeWidth={2.5} />
+              <X size={12} color={THEME.colors.danger} strokeWidth={2.5} />
             </TouchableOpacity>
           </View>
         </View>
@@ -2273,7 +2273,7 @@ export default function App() {
                 <TextInput
                   style={styles.input}
                   placeholder="Your name..."
-                  placeholderTextColor="#5A6078"
+                  placeholderTextColor={THEME.ink[35]}
                   value={authDisplayName}
                   onChangeText={setAuthDisplayName}
                   autoCapitalize="words"
@@ -2286,7 +2286,7 @@ export default function App() {
               <TextInput
                 style={styles.input}
                 placeholder="email@example.com"
-                placeholderTextColor="#5A6078"
+                placeholderTextColor={THEME.ink[35]}
                 value={authEmail}
                 onChangeText={setAuthEmail}
                 keyboardType="email-address"
@@ -2300,7 +2300,7 @@ export default function App() {
               <TextInput
                 style={styles.input}
                 placeholder="••••••••••••"
-                placeholderTextColor="#5A6078"
+                placeholderTextColor={THEME.ink[35]}
                 secureTextEntry
                 value={authPassword}
                 onChangeText={setAuthPassword}
@@ -2350,7 +2350,7 @@ export default function App() {
               <TextInput
                 style={styles.input}
                 placeholder="Paste partner's user ID key here..."
-                placeholderTextColor="#5A6078"
+                placeholderTextColor={THEME.ink[35]}
                 value={partnerIdInput}
                 onChangeText={setPartnerIdInput}
                 autoCapitalize="none"
@@ -2500,7 +2500,7 @@ export default function App() {
                             </View>
                             <AnimatedBar
                               progress={myStepPct / 100}
-                              color={myLeads ? THEME.colors.primary : 'rgba(237, 237, 244, 0.22)'}
+                              color={myLeads ? THEME.colors.primary : alpha(THEME.ink[95], 0.22)}
                               trackStyle={styles.stepTrack}
                               fillStyle={styles.stepFill}
                             />
@@ -2524,7 +2524,7 @@ export default function App() {
                             </View>
                             <AnimatedBar
                               progress={partnerStepPct / 100}
-                              color={partnerLeads ? THEME.colors.primary : 'rgba(237, 237, 244, 0.22)'}
+                              color={partnerLeads ? THEME.colors.primary : alpha(THEME.ink[95], 0.22)}
                               trackStyle={styles.stepTrack}
                               fillStyle={styles.stepFill}
                             />
@@ -2602,7 +2602,7 @@ export default function App() {
                       <GlassCard style={styles.sectionCard} blur={false}>
                         <View style={styles.rowBetween}>
                           <Text style={styles.sectionHeading}>ON THIS DAY</Text>
-                          <CalendarHeart size={16} color="#0E9594" />
+                          <CalendarHeart size={16} color={THEME.colors.primary} />
                         </View>
                         {todayMilestones.map((m) => {
                           const { count, unit } = elapsedAt(m, new Date());
@@ -2643,7 +2643,7 @@ export default function App() {
                       <View style={styles.rowBetween}>
                         <Text style={styles.sectionHeading}>DAILY CHECK-IN</Text>
                         <View style={styles.streakPill}>
-                          <Flame size={13} color="#E0A458" />
+                          <Flame size={13} color={THEME.colors.warning} />
                           <Text style={styles.streakPillText}>{myStreak}d</Text>
                         </View>
                       </View>
@@ -2659,7 +2659,7 @@ export default function App() {
                               activeOpacity={0.8}
                             >
                               <Text style={styles.checkInEmoji}>{f.emoji}</Text>
-                              <Text style={[styles.checkInEmojiLabel, selected && { color: '#0E9594' }]}>{f.label}</Text>
+                              <Text style={[styles.checkInEmojiLabel, selected && { color: THEME.colors.primary }]}>{f.label}</Text>
                             </TouchableOpacity>
                           );
                         })}
@@ -2668,7 +2668,7 @@ export default function App() {
                       <TextInput
                         style={[styles.input, { marginTop: 12 }]}
                         placeholder="One thing you're grateful for (optional)"
-                        placeholderTextColor="#5A6078"
+                        placeholderTextColor={THEME.ink[35]}
                         value={checkInGratitude}
                         onChangeText={setCheckInGratitude}
                       />
@@ -2688,7 +2688,7 @@ export default function App() {
                           )}
                         </View>
                         <View style={styles.streakPill}>
-                          <Flame size={13} color="#E0A458" />
+                          <Flame size={13} color={THEME.colors.warning} />
                           <Text style={styles.streakPillText}>{partnerStreak}d</Text>
                         </View>
                       </View>
@@ -2762,11 +2762,11 @@ export default function App() {
                     <FadeInUp index={2}>
                     <View style={styles.navGrid}>
                       <TouchableOpacity style={styles.navCard} onPress={() => setActiveTab('todos')} activeOpacity={0.85}>
-                        <ListChecks size={26} color="#0E9594" strokeWidth={2} />
+                        <ListChecks size={26} color={THEME.colors.primary} strokeWidth={2} />
                         <Text style={styles.navCardLabel}>Todo List</Text>
                       </TouchableOpacity>
                       <TouchableOpacity style={styles.navCard} onPress={() => setActiveTab('complaints')} activeOpacity={0.85}>
-                        <MessageSquareWarning size={26} color="#0E9594" strokeWidth={2} />
+                        <MessageSquareWarning size={26} color={THEME.colors.primary} strokeWidth={2} />
                         <Text style={styles.navCardLabel}>Complaint Box</Text>
                       </TouchableOpacity>
                       <TouchableOpacity style={styles.navCard} onPress={() => setActiveTab('bucket')} activeOpacity={0.85}>
@@ -2774,7 +2774,7 @@ export default function App() {
                         <Text style={styles.navCardLabel}>Bucket List</Text>
                       </TouchableOpacity>
                       <TouchableOpacity style={styles.navCard} onPress={() => setActiveTab('milestones')} activeOpacity={0.85}>
-                        <CalendarHeart size={26} color="#0E9594" strokeWidth={2} />
+                        <CalendarHeart size={26} color={THEME.colors.primary} strokeWidth={2} />
                         <Text style={styles.navCardLabel}>Milestones</Text>
                       </TouchableOpacity>
                     </View>
@@ -2788,7 +2788,7 @@ export default function App() {
                         <GlassCard style={styles.sectionCard} blur={false}>
                           <View style={styles.rowBetween}>
                             <Text style={styles.sectionHeading}>WORD OF THE DAY</Text>
-                            <BookOpen size={16} color="#0E9594" />
+                            <BookOpen size={16} color={THEME.colors.primary} />
                           </View>
                           <Text style={styles.vocabWord}>{w.word}</Text>
                           <Text style={styles.vocabMeaning}>{w.meaning}</Text>
@@ -2834,7 +2834,7 @@ export default function App() {
                         onChangeText={handleNoteDraftChange}
                         onBlur={() => setNoteTyping(false)}
                         placeholder="Write a note for both partners..."
-                        placeholderTextColor="#2B2F44"
+                        placeholderTextColor={THEME.ink[16]}
                       />
                       <SubmitButton style={styles.primaryButton} onPress={handleAddNote}>
                         <Text style={styles.primaryBtnText}>Add Shared Note</Text>
@@ -2886,7 +2886,7 @@ export default function App() {
                 {activeTab === 'todos' && (
                   <View style={styles.tabContent}>
                     <TouchableOpacity style={styles.backRow} onPress={() => setActiveTab('hub')}>
-                      <ChevronLeft size={20} color="#0E9594" />
+                      <ChevronLeft size={20} color={THEME.colors.primary} />
                       <Text style={styles.backRowText}>Hub</Text>
                     </TouchableOpacity>
 
@@ -2895,14 +2895,14 @@ export default function App() {
                       <TextInput
                         style={styles.input}
                         placeholder="What needs doing?"
-                        placeholderTextColor="#5A6078"
+                        placeholderTextColor={THEME.ink[35]}
                         value={newTodoTitle}
                         onChangeText={setNewTodoTitle}
                       />
                       <TextInput
                         style={[styles.input, { height: 60, textAlignVertical: 'top' }]}
                         placeholder="Notes (optional)"
-                        placeholderTextColor="#5A6078"
+                        placeholderTextColor={THEME.ink[35]}
                         value={newTodoNotes}
                         onChangeText={setNewTodoNotes}
                         multiline
@@ -2913,7 +2913,7 @@ export default function App() {
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                           {todoDate ? (
                             <TouchableOpacity onPress={() => setTodoDate('')} style={{ marginRight: 10 }}>
-                              <Text style={{ color: '#0E9594', fontSize: 12, fontFamily: FONTS.bold }}>Clear</Text>
+                              <Text style={{ color: THEME.colors.primary, fontSize: 12, fontFamily: FONTS.bold }}>Clear</Text>
                             </TouchableOpacity>
                           ) : null}
                           <TouchableOpacity style={styles.reminderDateButton} onPress={() => openCalendarFor('todoDate')}>
@@ -2984,17 +2984,17 @@ export default function App() {
                                 style={[styles.reminderCheckbox, t.is_completed && styles.reminderCheckboxCompleted]}
                                 onPress={() => toggleTodo(t.id, !t.is_completed)}
                               >
-                                {t.is_completed && <Check size={13} color="#EDEDF4" strokeWidth={3} />}
+                                {t.is_completed && <Check size={13} color={THEME.ink[95]} strokeWidth={3} />}
                               </TouchableOpacity>
                               <View style={{ flex: 1 }}>
                                 <Text style={[styles.reminderTitle, t.is_completed && styles.strikethroughText]}>{t.title}</Text>
-                                <Text style={{ color: '#0E9594', fontSize: 11, fontFamily: FONTS.bold, marginTop: 2 }}>
+                                <Text style={{ color: THEME.colors.primary, fontSize: 11, fontFamily: FONTS.bold, marginTop: 2 }}>
                                   {timeLabel} · {recLabel} · by {getCreatorName(t.created_by)}
                                 </Text>
-                                {t.notes ? <Text style={{ color: '#8B90A4', fontSize: 12, marginTop: 2, fontFamily: FONTS.body }}>{t.notes}</Text> : null}
+                                {t.notes ? <Text style={{ color: THEME.ink[50], fontSize: 12, marginTop: 2, fontFamily: FONTS.body }}>{t.notes}</Text> : null}
                               </View>
                               <TouchableOpacity style={styles.reminderDeleteButton} onPress={() => deleteTodo(t.id)}>
-                                <X size={13} color="#0E9594" strokeWidth={2.5} />
+                                <X size={13} color={THEME.colors.primary} strokeWidth={2.5} />
                               </TouchableOpacity>
                             </View>
                           );
@@ -3009,7 +3009,7 @@ export default function App() {
                 {activeTab === 'milestones' && (
                   <View style={styles.tabContent}>
                     <TouchableOpacity style={styles.backRow} onPress={() => setActiveTab('hub')}>
-                      <ChevronLeft size={20} color="#0E9594" />
+                      <ChevronLeft size={20} color={THEME.colors.primary} />
                       <Text style={styles.backRowText}>Hub</Text>
                     </TouchableOpacity>
 
@@ -3018,7 +3018,7 @@ export default function App() {
                       <TextInput
                         style={styles.input}
                         placeholder="e.g. First Date, Anniversary"
-                        placeholderTextColor="#5A6078"
+                        placeholderTextColor={THEME.ink[35]}
                         value={newMilestoneTitle}
                         onChangeText={setNewMilestoneTitle}
                       />
@@ -3028,7 +3028,7 @@ export default function App() {
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                           {milestoneDate ? (
                             <TouchableOpacity onPress={() => setMilestoneDate('')} style={{ marginRight: 10 }}>
-                              <Text style={{ color: '#0E9594', fontSize: 12, fontFamily: FONTS.bold }}>Clear</Text>
+                              <Text style={{ color: THEME.colors.primary, fontSize: 12, fontFamily: FONTS.bold }}>Clear</Text>
                             </TouchableOpacity>
                           ) : null}
                           <TouchableOpacity style={styles.reminderDateButton} onPress={() => openCalendarFor('milestoneDate')}>
@@ -3089,12 +3089,12 @@ export default function App() {
                               <Text style={styles.milestoneRowEmoji}>{m.emoji || '💛'}</Text>
                               <View style={{ flex: 1 }}>
                                 <Text style={styles.reminderTitle}>{m.title}</Text>
-                                <Text style={{ color: '#0E9594', fontSize: 11, fontFamily: FONTS.bold, marginTop: 2 }}>
+                                <Text style={{ color: THEME.colors.primary, fontSize: 11, fontFamily: FONTS.bold, marginTop: 2 }}>
                                   {base.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })} · {recLabel} · {whenLabel}
                                 </Text>
                               </View>
                               <TouchableOpacity style={styles.reminderDeleteButton} onPress={() => deleteMilestone(m.id)}>
-                                <X size={13} color="#0E9594" strokeWidth={2.5} />
+                                <X size={13} color={THEME.colors.primary} strokeWidth={2.5} />
                               </TouchableOpacity>
                             </View>
                           );
@@ -3112,7 +3112,7 @@ export default function App() {
                       style={styles.backRow}
                       onPress={() => { if (openComplaintId) setOpenComplaintId(null); else setActiveTab('hub'); }}
                     >
-                      <ChevronLeft size={20} color="#0E9594" />
+                      <ChevronLeft size={20} color={THEME.colors.primary} />
                       <Text style={styles.backRowText}>{openComplaintId ? 'All complaints' : 'Hub'}</Text>
                     </TouchableOpacity>
 
@@ -3124,12 +3124,12 @@ export default function App() {
                         <GlassCard style={styles.sectionCard} blur={false}>
                           <View style={styles.rowBetween}>
                             <Text style={[styles.sectionHeading, { flex: 1 }]}>{c.title}</Text>
-                            <View style={[styles.statusChip, { backgroundColor: c.status === 'resolved' ? 'rgba(14, 149, 148,0.18)' : 'rgba(14, 149, 148,0.18)' }]}>
-                              <Text style={{ color: c.status === 'resolved' ? '#0E9594' : '#0E9594', fontSize: 10, fontFamily: FONTS.heavy }}>{c.status.toUpperCase()}</Text>
+                            <View style={[styles.statusChip, { backgroundColor: c.status === 'resolved' ? alpha(THEME.colors.primary, 0.18) : alpha(THEME.colors.primary, 0.18) }]}>
+                              <Text style={{ color: c.status === 'resolved' ? THEME.colors.primary : THEME.colors.primary, fontSize: 10, fontFamily: FONTS.heavy }}>{c.status.toUpperCase()}</Text>
                             </View>
                           </View>
-                          <Text style={{ color: '#8B90A4', fontSize: 11, marginBottom: 6, fontFamily: FONTS.body }}>Filed by {getCreatorName(c.created_by)}</Text>
-                          {c.body ? <Text style={{ color: '#F4F5FA', fontSize: 14, marginBottom: 12, fontFamily: FONTS.body }}>{c.body}</Text> : null}
+                          <Text style={{ color: THEME.ink[50], fontSize: 11, marginBottom: 6, fontFamily: FONTS.body }}>Filed by {getCreatorName(c.created_by)}</Text>
+                          {c.body ? <Text style={{ color: THEME.ink[100], fontSize: 14, marginBottom: 12, fontFamily: FONTS.body }}>{c.body}</Text> : null}
 
                           <View style={{ gap: 8, marginBottom: 12 }}>
                             {thread.length === 0 ? (
@@ -3138,8 +3138,8 @@ export default function App() {
                               const mine = r.author_id === userId;
                               return (
                                 <View key={r.id} style={[styles.replyBubble, mine ? styles.replyMine : styles.replyTheirs]}>
-                                  <Text style={{ color: '#0E9594', fontSize: 10, fontFamily: FONTS.heavy, marginBottom: 2 }}>{getCreatorName(r.author_id)}</Text>
-                                  <Text style={{ color: '#F4F5FA', fontSize: 13, fontFamily: FONTS.body }}>{r.body}</Text>
+                                  <Text style={{ color: THEME.colors.primary, fontSize: 10, fontFamily: FONTS.heavy, marginBottom: 2 }}>{getCreatorName(r.author_id)}</Text>
+                                  <Text style={{ color: THEME.ink[100], fontSize: 13, fontFamily: FONTS.body }}>{r.body}</Text>
                                 </View>
                               );
                             })}
@@ -3149,12 +3149,12 @@ export default function App() {
                             <TextInput
                               style={[styles.input, { flex: 1, marginBottom: 0 }]}
                               placeholder="Write a reply..."
-                              placeholderTextColor="#5A6078"
+                              placeholderTextColor={THEME.ink[35]}
                               value={replyText}
                               onChangeText={setReplyText}
                             />
                             <SubmitButton style={styles.plusAddButton} onPress={() => handleAddReply(c.id)}>
-                              <Send size={18} color="#EDEDF4" />
+                              <Send size={18} color={THEME.ink[95]} />
                             </SubmitButton>
                           </View>
 
@@ -3167,10 +3167,10 @@ export default function App() {
                             </TouchableOpacity>
                             {c.created_by === userId ? (
                               <TouchableOpacity
-                                style={[styles.secondaryButton, { flex: 1, backgroundColor: 'rgba(14, 149, 148,0.16)' }]}
+                                style={[styles.secondaryButton, { flex: 1, backgroundColor: alpha(THEME.colors.primary, 0.16) }]}
                                 onPress={() => { deleteComplaint(c.id); setOpenComplaintId(null); }}
                               >
-                                <Text style={[styles.secondaryBtnText, { color: '#0E9594' }]}>Delete</Text>
+                                <Text style={[styles.secondaryBtnText, { color: THEME.colors.primary }]}>Delete</Text>
                               </TouchableOpacity>
                             ) : null}
                           </View>
@@ -3183,14 +3183,14 @@ export default function App() {
                           <TextInput
                             style={styles.input}
                             placeholder="Title (e.g. You left the lights on)"
-                            placeholderTextColor="#5A6078"
+                            placeholderTextColor={THEME.ink[35]}
                             value={newComplaintTitle}
                             onChangeText={setNewComplaintTitle}
                           />
                           <TextInput
                             style={[styles.input, { height: 80, textAlignVertical: 'top' }]}
                             placeholder="Describe it (optional)"
-                            placeholderTextColor="#5A6078"
+                            placeholderTextColor={THEME.ink[35]}
                             value={newComplaintBody}
                             onChangeText={setNewComplaintBody}
                             multiline
@@ -3210,12 +3210,12 @@ export default function App() {
                               <TouchableOpacity key={c.id} style={styles.ticketRow} onPress={() => setOpenComplaintId(c.id)}>
                                 <View style={{ flex: 1 }}>
                                   <Text style={styles.ticketTitle}>{c.title}</Text>
-                                  <Text style={{ color: '#8B90A4', fontSize: 11, marginTop: 2, fontFamily: FONTS.body }}>
+                                  <Text style={{ color: THEME.ink[50], fontSize: 11, marginTop: 2, fontFamily: FONTS.body }}>
                                     by {getCreatorName(c.created_by)} · {count} {count === 1 ? 'reply' : 'replies'}
                                   </Text>
                                 </View>
-                                <View style={[styles.statusChip, { backgroundColor: c.status === 'resolved' ? 'rgba(14, 149, 148,0.18)' : 'rgba(14, 149, 148,0.18)' }]}>
-                                  <Text style={{ color: c.status === 'resolved' ? '#0E9594' : '#0E9594', fontSize: 10, fontFamily: FONTS.heavy }}>{c.status.toUpperCase()}</Text>
+                                <View style={[styles.statusChip, { backgroundColor: c.status === 'resolved' ? alpha(THEME.colors.primary, 0.18) : alpha(THEME.colors.primary, 0.18) }]}>
+                                  <Text style={{ color: c.status === 'resolved' ? THEME.colors.primary : THEME.colors.primary, fontSize: 10, fontFamily: FONTS.heavy }}>{c.status.toUpperCase()}</Text>
                                 </View>
                               </TouchableOpacity>
                             );
@@ -3396,14 +3396,14 @@ export default function App() {
                         <TextInput
                           style={styles.input}
                           placeholder="Item or Subscription Name..."
-                          placeholderTextColor="#5A6078"
+                          placeholderTextColor={THEME.ink[35]}
                           value={newItemName}
                           onChangeText={setNewItemName}
                         />
                         <TextInput
                           style={styles.input}
                           placeholder="Amount (₹)..."
-                          placeholderTextColor="#5A6078"
+                          placeholderTextColor={THEME.ink[35]}
                           keyboardType="numeric"
                           value={newAmount}
                           onChangeText={setNewAmount}
@@ -3463,10 +3463,10 @@ export default function App() {
                             <Text style={styles.btnText}>Subscription</Text>
                           </TouchableOpacity>
                           <TouchableOpacity 
-                            style={[styles.smallBtn, { flex: 1 }, newType === 'self_liability' && { backgroundColor: 'rgba(224, 164, 88, 0.20)', shadowColor: '#E0A458', shadowOpacity: 0.5, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 8 }]}
+                            style={[styles.smallBtn, { flex: 1 }, newType === 'self_liability' && { backgroundColor: alpha(THEME.colors.warning, 0.20), shadowColor: THEME.colors.warning, shadowOpacity: 0.5, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 8 }]}
                             onPress={() => setNewType('self_liability')}
                           >
-                            <Text style={[styles.btnText, newType === 'self_liability' && { color: '#E0A458', fontFamily: FONTS.bold }]}>Self Liability</Text>
+                            <Text style={[styles.btnText, newType === 'self_liability' && { color: THEME.colors.warning, fontFamily: FONTS.bold }]}>Self Liability</Text>
                           </TouchableOpacity>
                         </View>
 
@@ -3616,7 +3616,7 @@ export default function App() {
                               />
                               {phaseData.fertileNow && (
                                 <View style={styles.fertileChip}>
-                                  <Sparkles size={12} color="#EDEDF4" strokeWidth={2.4} />
+                                  <Sparkles size={12} color={THEME.ink[95]} strokeWidth={2.4} />
                                   <Text style={styles.fertileChipText}>Fertile window open</Text>
                                 </View>
                               )}
@@ -3650,7 +3650,7 @@ export default function App() {
                       <TextInput
                         style={styles.input}
                         placeholder="Reason for visit..."
-                        placeholderTextColor="#5A6078"
+                        placeholderTextColor={THEME.ink[35]}
                         value={hospitalReason}
                         onChangeText={setHospitalReason}
                       />
@@ -3659,7 +3659,7 @@ export default function App() {
                         textAlignVertical="top"
                         style={[styles.input, styles.noteInput]}
                         placeholder="Test results / doctor notes..."
-                        placeholderTextColor="#5A6078"
+                        placeholderTextColor={THEME.ink[35]}
                         value={hospitalResults}
                         onChangeText={setHospitalResults}
                       />
@@ -3696,7 +3696,7 @@ export default function App() {
                 {activeTab === 'bucket' && (
                   <View style={styles.tabContent}>
                     <TouchableOpacity style={styles.backRow} onPress={() => setActiveTab('hub')}>
-                      <ChevronLeft size={20} color="#0E9594" />
+                      <ChevronLeft size={20} color={THEME.colors.primary} />
                       <Text style={styles.backRowText}>Hub</Text>
                     </TouchableOpacity>
                     <GlassCard style={styles.sectionCard} blur={false}>
@@ -3704,7 +3704,7 @@ export default function App() {
                       <TextInput
                         style={styles.input}
                         placeholder="Header..."
-                        placeholderTextColor="#5A6078"
+                        placeholderTextColor={THEME.ink[35]}
                         value={newBucketTitle}
                         onChangeText={setNewBucketTitle}
                       />
@@ -3713,7 +3713,7 @@ export default function App() {
                         textAlignVertical="top"
                         style={[styles.input, styles.noteInput]}
                         placeholder="Description..."
-                        placeholderTextColor="#5A6078"
+                        placeholderTextColor={THEME.ink[35]}
                         value={newBucketDescription}
                         onChangeText={setNewBucketDescription}
                       />
@@ -3748,11 +3748,11 @@ export default function App() {
             <Svg width="100%" height="100%">
               <Defs>
                 <SvgLinearGradient id="bottomOverlayBlackFade" x1="0" y1="1" x2="0" y2="0">
-                  <Stop offset="0%" stopColor="#1E2030" stopOpacity="1" />
-                  <Stop offset="15%" stopColor="#1E2030" stopOpacity="1" />
-                  <Stop offset="45%" stopColor="#1E2030" stopOpacity="0.9" />
-                  <Stop offset="70%" stopColor="#1E2030" stopOpacity="0.5" />
-                  <Stop offset="100%" stopColor="#1E2030" stopOpacity="0" />
+                  <Stop offset="0%" stopColor={THEME.colors.background} stopOpacity="1" />
+                  <Stop offset="15%" stopColor={THEME.colors.background} stopOpacity="1" />
+                  <Stop offset="45%" stopColor={THEME.colors.background} stopOpacity="0.9" />
+                  <Stop offset="70%" stopColor={THEME.colors.background} stopOpacity="0.5" />
+                  <Stop offset="100%" stopColor={THEME.colors.background} stopOpacity="0" />
                 </SvgLinearGradient>
               </Defs>
               <Rect width="100%" height="100%" fill="url(#bottomOverlayBlackFade)" />
@@ -3790,19 +3790,20 @@ export default function App() {
                 <Calendar
                   onDayPress={(day: any) => handleDateSelect(day.dateString)}
                   theme={{
-                    backgroundColor: '#262A40',
-                    calendarBackground: '#262A40',
-                    textSectionTitleColor: '#E0A458',
-                    selectedDayBackgroundColor: '#0E9594',
-                    // Cream ink on the red selection — reads cleanly against #0E9594.
-                    selectedDayTextColor: '#EDEDF4',
-                    todayTextColor: '#0E9594',
-                    dayTextColor: '#F4F5FA',
-                    textDisabledColor: '#2B2F44',
-                    dotColor: '#0E9594',
-                    selectedDotColor: '#EDEDF4',
-                    arrowColor: '#0E9594',
-                    monthTextColor: '#EDEDF4',
+                    backgroundColor: THEME.colors.charcoal,
+                    calendarBackground: THEME.colors.charcoal,
+                    textSectionTitleColor: THEME.colors.warning,
+                    selectedDayBackgroundColor: THEME.colors.primary,
+                    // Body ink on the accent selection — the one pairing here
+                    // that has to stay legible whatever the accent hue becomes.
+                    selectedDayTextColor: THEME.ink[95],
+                    todayTextColor: THEME.colors.primary,
+                    dayTextColor: THEME.ink[100],
+                    textDisabledColor: THEME.ink[16],
+                    dotColor: THEME.colors.primary,
+                    selectedDotColor: THEME.ink[95],
+                    arrowColor: THEME.colors.primary,
+                    monthTextColor: THEME.ink[95],
                     // The calendar takes font families through its own theme keys,
                     // so it isn't covered by the stylesheet — without these it
                     // would be the one surface still rendering in the system font.
@@ -3838,7 +3839,7 @@ export default function App() {
                 style={[
                   StyleSheet.absoluteFill,
                   {
-                    backgroundColor: 'rgba(0,0,0,0.6)',
+                    backgroundColor: alpha(THEME.ink[0], 0.6),
                     opacity: drawerAnim.interpolate({
                       inputRange: [0, 1],
                       outputRange: [0, 1],
@@ -3880,7 +3881,7 @@ export default function App() {
                   <Text style={styles.drawerProfileEmail}>{session?.user?.email}</Text>
                   {partnerProfile && (
                     <View style={styles.drawerPartnerRow}>
-                      <Heart size={12} color="#0E9594" fill="#0E9594" style={{ marginRight: 4 }} />
+                      <Heart size={12} color={THEME.colors.primary} fill={THEME.colors.primary} style={{ marginRight: 4 }} />
                       <Text style={styles.drawerPartnerText}>Paired with {partnerProfile.display_name || partnerName}</Text>
                     </View>
                   )}
@@ -3894,7 +3895,7 @@ export default function App() {
                     setIsCycleModalVisible(true);
                   }}
                 >
-                  <Activity color="#0E9594" size={20} style={{ marginRight: 12 }} />
+                  <Activity color={THEME.colors.primary} size={20} style={{ marginRight: 12 }} />
                   <Text style={styles.drawerMenuText}>Cycle Tracker</Text>
                 </TouchableOpacity>
 
@@ -3906,7 +3907,7 @@ export default function App() {
                     markUpdatesViewed();
                   }}
                 >
-                  <ScrollText color="#0E9594" size={20} style={{ marginRight: 12 }} />
+                  <ScrollText color={THEME.colors.primary} size={20} style={{ marginRight: 12 }} />
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     <Text style={styles.drawerMenuText}>Changelog</Text>
                     {hasUnseenUpdate && <View style={styles.unseenDot} />}
@@ -3920,7 +3921,7 @@ export default function App() {
                     setIsSettingsVisible(true);
                   }}
                 >
-                  <SettingsIcon color="#0E9594" size={20} style={{ marginRight: 12 }} />
+                  <SettingsIcon color={THEME.colors.primary} size={20} style={{ marginRight: 12 }} />
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     <Text style={styles.drawerMenuText}>Settings</Text>
                   </View>
@@ -3940,8 +3941,8 @@ export default function App() {
                     );
                   }}
                 >
-                  <LogOut color="#F24722" size={20} style={{ marginRight: 12 }} />
-                  <Text style={[styles.drawerMenuText, { color: '#F24722' }]}>Sign Out</Text>
+                  <LogOut color={THEME.colors.danger} size={20} style={{ marginRight: 12 }} />
+                  <Text style={[styles.drawerMenuText, { color: THEME.colors.danger }]}>Sign Out</Text>
                 </TouchableOpacity>
 
                 {/* Branding + running version, pinned to the bottom of the drawer. */}
@@ -3969,7 +3970,7 @@ export default function App() {
                 <View style={styles.settingsHeader}>
                   <Text style={styles.settingsTitle}>ACCOUNT &amp; PAIRING</Text>
                   <TouchableOpacity onPress={() => setIsSettingsVisible(false)}>
-                    <X color="#F4F5FA" size={20} />
+                    <X color={THEME.ink[100]} size={20} />
                   </TouchableOpacity>
                 </View>
                 
@@ -3982,7 +3983,7 @@ export default function App() {
                       <TextInput
                         style={styles.settingsInput}
                         placeholder="Enter name..."
-                        placeholderTextColor="#5A6078"
+                        placeholderTextColor={THEME.ink[35]}
                         value={tempDisplayName}
                         onChangeText={setTempDisplayName}
                       />
@@ -4046,7 +4047,7 @@ export default function App() {
                 <View style={styles.settingsHeader}>
                   <Text style={styles.settingsTitle}>SEASON STAKES</Text>
                   <TouchableOpacity onPress={() => setStakesModalOpen(false)}>
-                    <X color="#F4F5FA" size={20} />
+                    <X color={THEME.ink[100]} size={20} />
                   </TouchableOpacity>
                 </View>
                 <View>
@@ -4058,7 +4059,7 @@ export default function App() {
                     <TextInput
                       style={[styles.settingsInput, { minHeight: 84, textAlignVertical: 'top' }]}
                       placeholder="e.g. Loser cooks dinner for a week"
-                      placeholderTextColor="#5A6078"
+                      placeholderTextColor={THEME.ink[35]}
                       value={stakesDraft}
                       onChangeText={setStakesDraft}
                       multiline
@@ -4089,7 +4090,7 @@ export default function App() {
                 <View style={styles.settingsHeader}>
                   <Text style={styles.settingsTitle}>CYCLE TRACKER</Text>
                   <TouchableOpacity onPress={() => setIsCycleModalVisible(false)}>
-                    <X color="#F4F5FA" size={20} />
+                    <X color={THEME.ink[100]} size={20} />
                   </TouchableOpacity>
                 </View>
 
@@ -4163,7 +4164,7 @@ export default function App() {
                       </SubmitButton>
 
                       <TouchableOpacity
-                        style={[styles.calendarPickerBtn, { marginTop: 8, marginBottom: 20, backgroundColor: 'rgba(237, 237, 244,0.06)' }]}
+                        style={[styles.calendarPickerBtn, { marginTop: 8, marginBottom: 20, backgroundColor: alpha(THEME.ink[95], 0.06) }]}
                         onPress={() => {
                           if (records && records.length > 0) setIsEditingCycle(false);
                           else setIsCycleModalVisible(false);
@@ -4190,7 +4191,7 @@ export default function App() {
                             )}
                             {phaseData.fertileNow && (
                               <View style={[styles.fertileChip, { alignSelf: 'flex-start', marginTop: 10 }]}>
-                                <Sparkles size={12} color="#EDEDF4" strokeWidth={2.4} />
+                                <Sparkles size={12} color={THEME.ink[95]} strokeWidth={2.4} />
                                 <Text style={styles.fertileChipText}>Fertile window open</Text>
                               </View>
                             )}
@@ -4301,7 +4302,7 @@ export default function App() {
                 <View style={styles.settingsHeader}>
                   <Text style={styles.settingsTitle}>CHANGELOG</Text>
                   <TouchableOpacity onPress={() => setIsChangelogVisible(false)}>
-                    <X color="#F4F5FA" size={20} />
+                    <X color={THEME.ink[100]} size={20} />
                   </TouchableOpacity>
                 </View>
 
@@ -4341,7 +4342,7 @@ export default function App() {
                 <View style={styles.settingsHeader}>
                   <Text style={styles.settingsTitle}>HOSPITAL VISIT</Text>
                   <TouchableOpacity onPress={() => setOpenMedLog(null)}>
-                    <X color="#F4F5FA" size={20} />
+                    <X color={THEME.ink[100]} size={20} />
                   </TouchableOpacity>
                 </View>
 
@@ -4375,7 +4376,7 @@ export default function App() {
 const styles = StyleSheet.create({
   appShell: {
     flex: 1,
-    backgroundColor: '#1E2030',
+    backgroundColor: THEME.colors.background,
   },
   container: {
     flex: 1,
@@ -4396,13 +4397,13 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 22,
     fontFamily: FONTS.bold,
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     marginBottom: THEME.spacing.md,
     textAlign: 'center',
   },
   authInfo: {
     fontFamily: FONTS.body,
-    color: '#C6CAD6',
+    color: THEME.ink[70],
     fontSize: 14,
     lineHeight: 20,
     textAlign: 'center',
@@ -4438,20 +4439,20 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   welcomeSubtitle: {
-    color: '#F4F5FA',
+    color: THEME.ink[100],
     fontSize: 24,
     fontFamily: FONTS.bold,
     marginBottom: THEME.spacing.xs,
   },
   suggestionContainer: {
-    backgroundColor: 'rgba(237, 237, 244, 0.03)',
+    backgroundColor: alpha(THEME.ink[95], 0.03),
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginTop: 8,
   },
   welcomeCopy: {
-    color: '#8B90A4',
+    color: THEME.ink[50],
     fontSize: 13,
     lineHeight: 18,
     fontFamily: FONTS.body,
@@ -4476,7 +4477,7 @@ const styles = StyleSheet.create({
   },
   partnerName: {
     fontSize: 20,
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontFamily: FONTS.display,
   },
   moodBadge: {
@@ -4564,7 +4565,7 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   stepFootnoteAction: {
-    color: '#0E9594',
+    color: THEME.colors.primary,
     fontFamily: FONTS.heavy,
   },
   stepDivider: {
@@ -4757,7 +4758,7 @@ const styles = StyleSheet.create({
   cycleMiniDivider: {
     width: 1,
     height: 26,
-    backgroundColor: 'rgba(237, 237, 244, 0.12)',
+    backgroundColor: alpha(THEME.ink[95], 0.12),
   },
   cycleTrack: {
     height: 5,
@@ -4798,7 +4799,7 @@ const styles = StyleSheet.create({
   },
   fertileChipText: {
     fontFamily: FONTS.bold,
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontSize: 11,
     letterSpacing: 0.3,
   },
@@ -4892,14 +4893,14 @@ const styles = StyleSheet.create({
     ...THEME.shadow.soft,
   },
   moodBtnText: {
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontSize: 10,
     fontFamily: FONTS.semibold,
   },
   input: {
     ...THEME.material.well,
     fontFamily: FONTS.body,
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     borderRadius: THEME.borderRadius.md,
     paddingHorizontal: THEME.spacing.md,
     paddingVertical: 14,
@@ -4907,7 +4908,7 @@ const styles = StyleSheet.create({
     marginBottom: THEME.spacing.sm,
   },
   primaryButton: {
-    backgroundColor: '#0E9594',
+    backgroundColor: THEME.colors.primary,
     padding: THEME.spacing.md,
     borderRadius: THEME.borderRadius.md,
     alignItems: 'center',
@@ -4915,7 +4916,7 @@ const styles = StyleSheet.create({
     ...THEME.shadow.glowAccent,
   },
   primaryBtnText: {
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontFamily: FONTS.heavy,
     fontSize: 19,
     letterSpacing: 1.5,
@@ -4943,7 +4944,7 @@ const styles = StyleSheet.create({
   },
   noteBody: {
     fontFamily: FONTS.body,
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontSize: 13,
     lineHeight: 19,
     marginTop: THEME.spacing.sm,
@@ -4987,7 +4988,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 26,
     fontFamily: FONTS.display,
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     marginBottom: THEME.spacing.sm,
     marginTop: THEME.spacing.md,
     letterSpacing: -0.4,
@@ -5014,19 +5015,19 @@ const styles = StyleSheet.create({
     backgroundColor: THEME.glass.accentStrong,
   },
   spinnerButtonText: {
-    color: '#0E9594',
+    color: THEME.colors.primary,
     fontSize: 22,
     lineHeight: 24,
     fontFamily: FONTS.heavy,
   },
   spinnerValue: {
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontSize: 40,
     fontFamily: FONTS.heavy,
     marginTop: THEME.spacing.sm,
   },
   spinnerLabel: {
-    color: '#C6CAD6',
+    color: THEME.ink[70],
     fontSize: 10,
     fontFamily: FONTS.heavy,
     marginBottom: THEME.spacing.sm,
@@ -5036,7 +5037,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   spinnerColon: {
-    color: '#0E9594',
+    color: THEME.colors.primary,
     fontSize: 32,
     fontFamily: FONTS.heavy,
   },
@@ -5054,25 +5055,25 @@ const styles = StyleSheet.create({
     borderRadius: THEME.borderRadius.sm,
   },
   activeSegmentOption: {
-    backgroundColor: 'rgba(14, 149, 148, 0.12)',
+    backgroundColor: alpha(THEME.colors.primary, 0.12),
   },
   segmentText: {
-    color: '#8B90A4',
+    color: THEME.ink[50],
     fontSize: 11,
     fontFamily: FONTS.heavy,
   },
   activeSegmentText: {
-    color: '#0E9594',
+    color: THEME.colors.primary,
   },
   emptyCard: {
-    backgroundColor: 'rgba(237, 237, 244, 0.035)',
+    backgroundColor: alpha(THEME.ink[95], 0.035),
     padding: THEME.spacing.lg,
     borderRadius: THEME.borderRadius.md,
     alignItems: 'center',
   },
   emptyText: {
     fontFamily: FONTS.body,
-    color: '#C6CAD6',
+    color: THEME.ink[70],
     fontSize: 15,
     textAlign: 'center',
   },
@@ -5083,12 +5084,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   reminderDateButtonText: {
-    color: '#E0A458',
+    color: THEME.colors.warning,
     fontSize: 12,
     fontFamily: FONTS.bold,
   },
   btnText: {
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontSize: 13,
     fontFamily: FONTS.bold,
   },
@@ -5113,19 +5114,19 @@ const styles = StyleSheet.create({
   },
   financeName: {
     fontSize: 15,
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontFamily: FONTS.bold,
   },
   financeMeta: {
     fontFamily: FONTS.body,
     fontSize: 11,
-    color: '#8B90A4',
+    color: THEME.ink[50],
     marginTop: 2,
   },
   financeAmount: {
     fontSize: 16,
     fontFamily: FONTS.displayBold,
-    color: '#0E9594',
+    color: THEME.colors.primary,
   },
   financeActions: {
     alignItems: 'flex-end',
@@ -5144,7 +5145,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   predText: {
-    color: '#0E9594',
+    color: THEME.colors.primary,
     fontSize: 13,
     lineHeight: 20,
     fontFamily: FONTS.semibold,
@@ -5158,35 +5159,35 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   vaultText: {
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontSize: 13,
     fontFamily: FONTS.bold,
   },
   vaultDate: {
     fontFamily: FONTS.body,
-    color: '#8B90A4',
+    color: THEME.ink[50],
     fontSize: 11,
   },
   vaultOpenHint: {
     fontFamily: FONTS.semibold,
-    color: '#0E9594',
+    color: THEME.colors.primary,
     fontSize: 11,
     marginTop: 4,
   },
   emptyStateText: {
     fontFamily: FONTS.body,
-    color: '#8B90A4',
+    color: THEME.ink[50],
     fontSize: 13,
     marginBottom: THEME.spacing.sm,
   },
   medDetailWho: {
     fontFamily: FONTS.bold,
-    color: '#0E9594',
+    color: THEME.colors.primary,
     fontSize: 15,
   },
   medDetailLabel: {
     fontFamily: FONTS.heavy,
-    color: '#8B90A4',
+    color: THEME.ink[50],
     fontSize: 11,
     letterSpacing: 1.2,
     marginTop: 18,
@@ -5194,7 +5195,7 @@ const styles = StyleSheet.create({
   },
   medDetailValue: {
     fontFamily: FONTS.body,
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontSize: 15,
     lineHeight: 22,
   },
@@ -5205,13 +5206,13 @@ const styles = StyleSheet.create({
     marginBottom: THEME.spacing.sm,
   },
   bucketText: {
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontSize: 14,
     fontFamily: FONTS.semibold,
   },
   bucketDescription: {
     fontFamily: FONTS.body,
-    color: '#C6CAD6',
+    color: THEME.ink[70],
     fontSize: 12,
     lineHeight: 18,
     marginTop: THEME.spacing.xs,
@@ -5239,7 +5240,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     alignItems: 'center',
     paddingHorizontal: 6,
-    shadowColor: '#000000',
+    shadowColor: THEME.ink[0],
     shadowOpacity: 0.6,
     shadowRadius: 30,
     shadowOffset: { width: 0, height: 18 },
@@ -5252,8 +5253,8 @@ const styles = StyleSheet.create({
     top: 8,
     bottom: 8,
     borderRadius: 24,
-    backgroundColor: 'rgba(14, 149, 148, 0.18)',
-    shadowColor: '#0E9594',
+    backgroundColor: alpha(THEME.colors.primary, 0.18),
+    shadowColor: THEME.colors.primary,
     shadowOpacity: 0.45,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 0 },
@@ -5278,7 +5279,7 @@ const styles = StyleSheet.create({
   },
   mutedText: {
     fontFamily: FONTS.body,
-    color: '#3A3F55',
+    color: THEME.ink[22],
     fontSize: 12,
     textAlign: 'center',
     marginTop: THEME.spacing.xs,
@@ -5300,7 +5301,7 @@ const styles = StyleSheet.create({
     backgroundColor: THEME.glass.accentStrong,
   },
   authTabText: {
-    color: '#8B90A4',
+    color: THEME.ink[50],
     fontSize: 12,
     fontFamily: FONTS.bold,
     letterSpacing: 1,
@@ -5315,7 +5316,7 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 10,
     fontFamily: FONTS.heavy,
-    color: '#C6CAD6',
+    color: THEME.ink[70],
     letterSpacing: 1,
     marginBottom: THEME.spacing.xs,
   },
@@ -5335,7 +5336,7 @@ const styles = StyleSheet.create({
     marginBottom: THEME.spacing.sm,
   },
   copyableIdText: {
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontSize: 12,
     fontFamily: FONTS.bold,
     backgroundColor: THEME.glass.surfaceStrong,
@@ -5347,7 +5348,7 @@ const styles = StyleSheet.create({
   copyInstructions: {
     fontFamily: FONTS.body,
     fontSize: 10,
-    color: '#8B90A4',
+    color: THEME.ink[50],
     marginTop: THEME.spacing.xs,
     fontStyle: 'italic',
   },
@@ -5391,13 +5392,13 @@ const styles = StyleSheet.create({
   analyticsLabel: {
     fontSize: 10,
     fontFamily: FONTS.heavy,
-    color: '#8B90A4',
+    color: THEME.ink[50],
     letterSpacing: 1.5,
   },
   analyticsCombinedValue: {
     fontSize: 28,
     fontFamily: FONTS.displayBold,
-    color: '#0E9594',
+    color: THEME.colors.primary,
     marginTop: 4,
   },
   progressGroup: {
@@ -5406,17 +5407,17 @@ const styles = StyleSheet.create({
   progressLabel: {
     fontSize: 10,
     fontFamily: FONTS.heavy,
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     letterSpacing: 1,
   },
   progressValue: {
     fontSize: 12,
     fontFamily: FONTS.displayBold,
-    color: '#0E9594',
+    color: THEME.colors.primary,
   },
   progressBarBg: {
     height: 8,
-    backgroundColor: 'rgba(237, 237, 244, 0.12)',
+    backgroundColor: alpha(THEME.ink[95], 0.12),
     borderRadius: 4,
     marginTop: 4,
     overflow: 'hidden',
@@ -5440,28 +5441,28 @@ const styles = StyleSheet.create({
     ...THEME.shadow.soft,
   },
   activeDateCard: {
-    backgroundColor: '#0E9594',
+    backgroundColor: THEME.colors.primary,
     ...THEME.shadow.glowAccent,
   },
   dateCardDay: {
     fontSize: 9,
     fontFamily: FONTS.heavy,
-    color: '#C6CAD6',
+    color: THEME.ink[70],
     letterSpacing: 1,
   },
   activeDateCardText: {
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontFamily: FONTS.heavy,
   },
   dateCardNum: {
     fontSize: 18,
     fontFamily: FONTS.heavy,
-    color: '#EDEDF4',
+    color: THEME.ink[95],
   },
   dateCardMonth: {
     fontSize: 9,
     fontFamily: FONTS.heavy,
-    color: '#C6CAD6',
+    color: THEME.ink[70],
     letterSpacing: 1,
   },
   chipsRow: {
@@ -5477,7 +5478,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   quickAddChipText: {
-    color: '#0E9594',
+    color: THEME.colors.primary,
     fontSize: 12,
     fontFamily: FONTS.heavy,
   },
@@ -5491,17 +5492,17 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#0E9594',
+    backgroundColor: THEME.colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#0E9594',
+    shadowColor: THEME.colors.primary,
     shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 3,
   },
   noRemindersText: {
     fontFamily: FONTS.body,
-    color: '#8B90A4',
+    color: THEME.ink[50],
     fontSize: 13,
     textAlign: 'center',
     paddingVertical: THEME.spacing.md,
@@ -5524,23 +5525,23 @@ const styles = StyleSheet.create({
     backgroundColor: THEME.glass.inset,
   },
   reminderCheckboxCompleted: {
-    backgroundColor: '#0E9594',
+    backgroundColor: THEME.colors.primary,
     ...THEME.shadow.glowAccent,
   },
   reminderTitle: {
     flex: 1,
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontSize: 15,
     fontFamily: FONTS.semibold,
     marginLeft: THEME.spacing.sm,
   },
   strikethroughText: {
     textDecorationLine: 'line-through',
-    color: '#8B90A4',
+    color: THEME.ink[50],
   },
   calendarModalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(30, 32, 48, 0.92)',
+    backgroundColor: alpha(THEME.colors.background, 0.92),
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -5555,7 +5556,7 @@ const styles = StyleSheet.create({
   calendarModalTitle: {
     fontSize: 12,
     fontFamily: FONTS.heavy,
-    color: '#0E9594',
+    color: THEME.colors.primary,
     letterSpacing: 2,
     textAlign: 'center',
     marginBottom: 12,
@@ -5568,7 +5569,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   calendarCloseBtnText: {
-    color: '#F4F5FA',
+    color: THEME.ink[100],
     fontFamily: FONTS.bold,
     fontSize: 12,
     letterSpacing: 1.5,
@@ -5584,7 +5585,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   calendarPickerBtnText: {
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontSize: 14,
     fontFamily: FONTS.semibold,
   },
@@ -5595,7 +5596,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   questionTitle: {
-    color: '#E0A458',
+    color: THEME.colors.warning,
     fontSize: 10,
     fontFamily: FONTS.heavy,
     letterSpacing: 1,
@@ -5618,12 +5619,12 @@ const styles = StyleSheet.create({
     backgroundColor: THEME.glass.accentStrong,
   },
   optionText: {
-    color: '#F4F5FA',
+    color: THEME.ink[100],
     fontSize: 11,
     fontFamily: FONTS.semibold,
   },
   optionTextSelected: {
-    color: '#0E9594',
+    color: THEME.colors.primary,
     fontFamily: FONTS.bold,
   },
   adviceCard: {
@@ -5633,7 +5634,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   adviceHeading: {
-    color: '#E0A458',
+    color: THEME.colors.warning,
     fontSize: 12,
     fontFamily: FONTS.heavy,
     letterSpacing: 1.5,
@@ -5641,7 +5642,7 @@ const styles = StyleSheet.create({
   },
   adviceBody: {
     fontFamily: FONTS.display,
-    color: '#F4F5FA',
+    color: THEME.ink[100],
     fontSize: 12,
     lineHeight: 18,
   },
@@ -5664,7 +5665,7 @@ const styles = StyleSheet.create({
     width: 46,
     height: 46,
     borderRadius: 23,
-    backgroundColor: 'rgba(38, 42, 64, 0.82)',
+    backgroundColor: alpha(THEME.colors.charcoal, 0.82),
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 50,
@@ -5710,19 +5711,19 @@ const styles = StyleSheet.create({
   drawerBrand: {
     fontFamily: FONTS.displayBold,
     fontSize: 22,
-    color: '#0E9594',
+    color: THEME.colors.primary,
     letterSpacing: 2,
   },
   drawerBrandTag: {
     fontFamily: FONTS.body,
     fontSize: 12,
-    color: '#8B90A4',
+    color: THEME.ink[50],
     marginTop: 2,
   },
   drawerVersion: {
     fontFamily: FONTS.medium,
     fontSize: 11,
-    color: '#5A6078',
+    color: THEME.ink[35],
     marginTop: 8,
   },
   drawerProfileSection: {
@@ -5743,17 +5744,17 @@ const styles = StyleSheet.create({
   drawerAvatarText: {
     fontSize: 24,
     fontFamily: FONTS.bold,
-    color: '#0E9594',
+    color: THEME.colors.primary,
   },
   drawerProfileName: {
     fontSize: 18,
     fontFamily: FONTS.bold,
-    color: '#EDEDF4',
+    color: THEME.ink[95],
   },
   drawerProfileEmail: {
     fontFamily: FONTS.body,
     fontSize: 13,
-    color: '#8B90A4',
+    color: THEME.ink[50],
     marginTop: 2,
     marginBottom: 8,
   },
@@ -5768,7 +5769,7 @@ const styles = StyleSheet.create({
   drawerPartnerText: {
     fontSize: 11,
     fontFamily: FONTS.semibold,
-    color: '#E0A458',
+    color: THEME.colors.warning,
   },
   drawerMenuItem: {
     flexDirection: 'row',
@@ -5777,21 +5778,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 8,
     marginBottom: 8,
-    backgroundColor: 'rgba(237, 237, 244, 0.02)',
+    backgroundColor: alpha(THEME.ink[95], 0.02),
   },
   drawerMenuItemLogout: {
     marginTop: 'auto',
     marginBottom: Platform.OS === 'ios' ? 40 : 24,
-    backgroundColor: 'rgba(242, 71, 34, 0.05)',
+    backgroundColor: alpha(THEME.colors.danger, 0.05),
   },
   drawerMenuText: {
     fontSize: 15,
     fontFamily: FONTS.semibold,
-    color: '#EDEDF4',
+    color: THEME.ink[95],
   },
   settingsModalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(30, 32, 48, 0.95)',
+    backgroundColor: alpha(THEME.colors.background, 0.95),
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -5813,7 +5814,7 @@ const styles = StyleSheet.create({
   settingsTitle: {
     fontSize: 13,
     fontFamily: FONTS.heavy,
-    color: '#0E9594',
+    color: THEME.colors.primary,
     letterSpacing: 1.5,
   },
   settingsBody: {
@@ -5826,7 +5827,7 @@ const styles = StyleSheet.create({
   settingsSectionTitle: {
     fontSize: 11,
     fontFamily: FONTS.heavy,
-    color: '#E0A458',
+    color: THEME.colors.warning,
     letterSpacing: 1.5,
     marginBottom: 12,
     textTransform: 'uppercase',
@@ -5835,13 +5836,13 @@ const styles = StyleSheet.create({
     ...THEME.material.well,
     fontFamily: FONTS.body,
     borderRadius: 12,
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 14,
   },
   settingsSaveButton: {
-    backgroundColor: '#0E9594',
+    backgroundColor: THEME.colors.primary,
     paddingVertical: 12,
     borderRadius: 12,
     alignItems: 'center',
@@ -5849,26 +5850,26 @@ const styles = StyleSheet.create({
     ...THEME.shadow.glowAccent,
   },
   settingsSaveBtnText: {
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontFamily: FONTS.bold,
     fontSize: 12,
     letterSpacing: 1.5,
   },
   settingsHelpText: {
     fontFamily: FONTS.body,
-    color: '#8B90A4',
+    color: THEME.ink[50],
     fontSize: 12,
     lineHeight: 16,
     marginBottom: 12,
   },
   unpairButton: {
-    backgroundColor: 'rgba(242, 71, 34, 0.14)',
+    backgroundColor: alpha(THEME.colors.danger, 0.14),
     paddingVertical: 12,
     borderRadius: 12,
     alignItems: 'center',
   },
   unpairBtnText: {
-    color: '#F24722',
+    color: THEME.colors.danger,
     fontFamily: FONTS.bold,
     fontSize: 12,
     letterSpacing: 1.5,
@@ -5882,7 +5883,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   backRowText: {
-    color: '#0E9594',
+    color: THEME.colors.primary,
     fontSize: 14,
     fontFamily: FONTS.bold,
     marginLeft: 4,
@@ -5903,7 +5904,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   navCardLabel: {
-    color: '#F4F5FA',
+    color: THEME.ink[100],
     fontSize: 13,
     fontFamily: FONTS.bold,
     marginTop: 8,
@@ -5918,16 +5919,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: THEME.borderRadius.round,
-    backgroundColor: 'rgba(224, 164, 88, 0.16)',
+    backgroundColor: alpha(THEME.colors.warning, 0.16),
   },
   streakPillText: {
-    color: '#E0A458',
+    color: THEME.colors.warning,
     fontSize: 12,
     fontFamily: FONTS.bold,
     letterSpacing: 0.3,
   },
   checkInPrompt: {
-    color: '#F4F5FA',
+    color: THEME.ink[100],
     fontSize: 14,
     fontFamily: FONTS.medium,
     marginTop: 10,
@@ -5954,7 +5955,7 @@ const styles = StyleSheet.create({
     fontSize: 22,
   },
   checkInEmojiLabel: {
-    color: '#8B90A4',
+    color: THEME.ink[50],
     fontSize: 10,
     fontFamily: FONTS.semibold,
     marginTop: 4,
@@ -5969,18 +5970,18 @@ const styles = StyleSheet.create({
     borderTopColor: THEME.colors.border,
   },
   checkInPartnerLabel: {
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontSize: 13,
     fontFamily: FONTS.bold,
   },
   checkInPartnerValue: {
-    color: '#9AA0B6',
+    color: THEME.ink[55],
     fontSize: 12,
     fontFamily: FONTS.body,
     marginTop: 2,
   },
   checkInPartnerMuted: {
-    color: '#5A6078',
+    color: THEME.ink[35],
     fontSize: 12,
     fontFamily: FONTS.body,
     marginTop: 2,
@@ -5997,18 +5998,18 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   onThisDayTitle: {
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontSize: 15,
     fontFamily: FONTS.semibold,
   },
   onThisDayToday: {
-    color: '#0E9594',
+    color: THEME.colors.primary,
     fontSize: 12,
     fontFamily: FONTS.bold,
     marginTop: 2,
   },
   onThisDaySub: {
-    color: '#8B90A4',
+    color: THEME.ink[50],
     fontSize: 12,
     fontFamily: FONTS.medium,
     marginTop: 2,
@@ -6018,7 +6019,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   onThisDayManageText: {
-    color: '#0E9594',
+    color: THEME.colors.primary,
     fontSize: 12,
     fontFamily: FONTS.bold,
     letterSpacing: 0.3,
@@ -6038,21 +6039,21 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   vocabWord: {
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontSize: 22,
     fontFamily: FONTS.displayBold,
     marginTop: 6,
   },
   vocabMeaning: {
     fontFamily: FONTS.body,
-    color: '#F4F5FA',
+    color: THEME.ink[100],
     fontSize: 14,
     marginTop: 6,
     lineHeight: 20,
   },
   vocabExample: {
     fontFamily: FONTS.display,
-    color: '#8B90A4',
+    color: THEME.ink[50],
     fontSize: 13,
     fontStyle: 'italic',
     marginTop: 8,
@@ -6072,7 +6073,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   ticketTitle: {
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontSize: 15,
     fontFamily: FONTS.bold,
   },
@@ -6082,7 +6083,7 @@ const styles = StyleSheet.create({
     maxWidth: '88%',
   },
   replyMine: {
-    backgroundColor: 'rgba(14, 149, 148,0.16)',
+    backgroundColor: alpha(THEME.colors.primary, 0.16),
     alignSelf: 'flex-end',
   },
   replyTheirs: {
@@ -6097,7 +6098,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   secondaryBtnText: {
-    color: '#F4F5FA',
+    color: THEME.ink[100],
     fontFamily: FONTS.bold,
     fontSize: 13,
     letterSpacing: 0.3,
@@ -6109,24 +6110,24 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   updateVersion: {
-    color: '#0E9594',
+    color: THEME.colors.primary,
     fontSize: 13,
     fontFamily: FONTS.heavy,
   },
   updateDate: {
     fontFamily: FONTS.body,
-    color: '#8B90A4',
+    color: THEME.ink[50],
     fontSize: 11,
   },
   updateTitle: {
-    color: '#EDEDF4',
+    color: THEME.ink[95],
     fontSize: 14,
     fontFamily: FONTS.bold,
     marginTop: 4,
   },
   updateBody: {
     fontFamily: FONTS.body,
-    color: '#F4F5FA',
+    color: THEME.ink[100],
     fontSize: 13,
     marginTop: 4,
     lineHeight: 18,
@@ -6135,7 +6136,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#0E9594',
+    backgroundColor: THEME.colors.primary,
     marginLeft: 8,
   },
 });
