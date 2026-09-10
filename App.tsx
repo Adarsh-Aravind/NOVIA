@@ -38,6 +38,7 @@ import { useSteps } from './src/hooks/useSteps';
 import { Skeleton } from './src/components/common/Skeleton';
 import { HubSkeleton } from './src/components/common/HubSkeleton';
 import { GlassBacking, GlassCard } from './src/components/common/GlassCard';
+import { StepGraph } from './src/components/common/StepGraph';
 import { configureNotificationsAsync, PRIORITY_CHANNEL } from './src/services/notification';
 import { cancelScheduledNotificationsByPrefix, scheduleSharedReminder, scheduleLocalNotification } from './src/services/notification';
 import { supabase } from './src/services/supabase';
@@ -899,6 +900,7 @@ export default function App() {
   const {
     mySteps,
     partnerSteps,
+    series: stepSeries,
     status: stepsStatus,
     loading: stepsLoading,
     leader: stepLeader,
@@ -2244,10 +2246,9 @@ export default function App() {
   // --- Step Duel derived values ---
   // Only crown a leader once we have a real Health Connect read; otherwise a
   // recorded 0 would let the (mocked) partner "win" a day you couldn't track.
+  // The two-bar normalisation this used to need is gone: StepGraph scales
+  // against the whole week internally, so there is nothing to compute here.
   const stepsLive = stepsStatus === 'ready';
-  const stepMax = Math.max(mySteps, partnerSteps, 1);
-  const myStepPct = Math.round((mySteps / stepMax) * 100);
-  const partnerStepPct = Math.round((partnerSteps / stepMax) * 100);
   const myLeads = stepsLive && stepLeader === 'me';
   const partnerLeads = stepsLive && stepLeader === 'partner';
 
@@ -2510,53 +2511,42 @@ export default function App() {
                         </View>
                       ) : (
                         <>
-                          {/* You */}
-                          <View style={styles.stepCompetitor}>
-                            <View style={styles.stepRow}>
+                          {/* Today's totals, then the week behind them. The
+                              numbers answer "who is winning right now"; the
+                              graph answers everything else. */}
+                          <View style={styles.stepTodayRow}>
+                            <View style={styles.stepTodaySide}>
+                              <Text style={[styles.stepValue, myLeads && styles.stepValueLead]}>
+                                {mySteps.toLocaleString()}
+                              </Text>
                               <View style={styles.stepNameWrap}>
                                 <Text style={styles.stepName}>You</Text>
                                 {myLeads && (
                                   <View style={styles.leaderPill}>
-                                    <Trophy size={11} color={THEME.colors.background} />
-                                    <Text style={styles.leaderPillText}>Leading</Text>
+                                    <Trophy size={10} color={THEME.colors.background} />
                                   </View>
                                 )}
                               </View>
-                              <Text style={[styles.stepValue, myLeads && styles.stepValueLead]}>
-                                {mySteps.toLocaleString()}
-                              </Text>
                             </View>
-                            <AnimatedBar
-                              progress={myStepPct / 100}
-                              color={myLeads ? THEME.colors.primary : alpha(THEME.ink[95], 0.22)}
-                              trackStyle={styles.stepTrack}
-                              fillStyle={styles.stepFill}
-                            />
-                          </View>
 
-                          {/* Partner */}
-                          <View style={[styles.stepCompetitor, { marginTop: 14 }]}>
-                            <View style={styles.stepRow}>
-                              <View style={styles.stepNameWrap}>
-                                <Text style={styles.stepName}>{partnerName}</Text>
-                                {partnerLeads && (
-                                  <View style={styles.leaderPill}>
-                                    <Trophy size={11} color={THEME.colors.background} />
-                                    <Text style={styles.leaderPillText}>Leading</Text>
-                                  </View>
-                                )}
-                              </View>
+                            <Text style={styles.stepVersus}>vs</Text>
+
+                            <View style={[styles.stepTodaySide, { alignItems: 'flex-end' }]}>
                               <Text style={[styles.stepValue, partnerLeads && styles.stepValueLead]}>
                                 {partnerSteps.toLocaleString()}
                               </Text>
+                              <View style={styles.stepNameWrap}>
+                                {partnerLeads && (
+                                  <View style={styles.leaderPill}>
+                                    <Trophy size={10} color={THEME.colors.background} />
+                                  </View>
+                                )}
+                                <Text style={styles.stepName} numberOfLines={1}>{partnerName}</Text>
+                              </View>
                             </View>
-                            <AnimatedBar
-                              progress={partnerStepPct / 100}
-                              color={partnerLeads ? THEME.colors.primary : alpha(THEME.ink[95], 0.22)}
-                              trackStyle={styles.stepTrack}
-                              fillStyle={styles.stepFill}
-                            />
                           </View>
+
+                          <StepGraph series={stepSeries} partnerName={partnerName} />
 
                           <View style={styles.stepDivider} />
 
@@ -4533,6 +4523,19 @@ const styles = StyleSheet.create({
   },
 
   // --- Step Duel card ---
+  stepTodayRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 10,
+  },
+  stepTodaySide: { flex: 1, gap: 2 },
+  stepVersus: {
+    fontFamily: FONTS.medium,
+    fontSize: 11,
+    color: THEME.colors.textFaint,
+    paddingHorizontal: 10,
+  },
   stepCompetitor: {
     marginTop: 6,
   },
