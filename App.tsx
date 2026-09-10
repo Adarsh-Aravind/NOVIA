@@ -10,6 +10,7 @@ import {
   StatusBar,
   Platform,
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Animated,
   Easing,
@@ -23,7 +24,7 @@ import { Calendar } from 'react-native-calendars';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
 import { Menu, Settings as SettingsIcon, LogOut, X, Heart, Check, Square, CheckSquare, Home, FileText, Wallet, Activity, ListChecks, MessageSquareWarning, ChevronLeft, Send, BookOpen, Sparkles, ScrollText, CalendarHeart, Flame, Footprints, Trophy } from 'lucide-react-native';
-import Svg, { Defs, Image as SvgImage, LinearGradient as SvgLinearGradient, Pattern, RadialGradient, Rect, Stop } from 'react-native-svg';
+import Svg, { Defs, LinearGradient as SvgLinearGradient, RadialGradient, Rect, Stop } from 'react-native-svg';
 import * as Notifications from 'expo-notifications';
 import { TodoRecurrence, AppUpdate, Milestone, MilestoneRecurrence } from './src/types';
 import { useAuth } from './src/hooks/useAuth';
@@ -62,6 +63,7 @@ import {
 } from './src/utils/milestoneMath';
 import { BucketListItem, FinanceItem, MedicalRecord } from './src/types';
 import { getWordOfDay } from './src/constants/vocabulary';
+import { generateIdeas } from './src/services/groq';
 import { useFonts } from 'expo-font';
 import { Fraunces_600SemiBold } from '@expo-google-fonts/fraunces/600SemiBold';
 import { Fraunces_700Bold } from '@expo-google-fonts/fraunces/700Bold';
@@ -71,7 +73,6 @@ import { Manrope_600SemiBold } from '@expo-google-fonts/manrope/600SemiBold';
 import { Manrope_700Bold } from '@expo-google-fonts/manrope/700Bold';
 import { Manrope_800ExtraBold } from '@expo-google-fonts/manrope/800ExtraBold';
 import { alpha, FONTS, PALETTE, THEME } from './src/constants/theme';
-import { GRAIN_OPACITY, GRAIN_TILE, GRAIN_URI } from './src/constants/grain';
 import { SPRING, projectMomentum } from './src/constants/motion';
 import { useReducedMotion } from './src/hooks/useReducedMotion';
 
@@ -87,6 +88,18 @@ const CHECK_IN_FEELINGS: { emoji: string; label: string }[] = [
   { emoji: '😢', label: 'Rough' },
 ];
 
+/**
+ * Idea starters. A blank prompt box is the hardest question in the app, so
+ * these give the feature an obvious first move. Phrased as things someone
+ * would actually ask, not as feature names.
+ */
+const IDEA_STARTERS = [
+  'Date ideas this weekend',
+  'A cheap night in',
+  'Gift ideas',
+  'Something to cheer her up',
+] as const;
+
 // Emoji palette offered when creating a milestone.
 const MILESTONE_EMOJIS = ['💛', '💍', '🌹', '🎉', '✈️', '🏡', '🎂', '⭐'] as const;
 
@@ -94,7 +107,7 @@ const PHASE_COLORS = THEME.colors.phase;
 
 /**
  * The ground: one neon-orange source burning in the top-left corner, falling
- * away along the diagonal into black, with grain over the whole thing.
+ * away along the diagonal into black.
  *
  * Three details do most of the work:
  *
@@ -109,10 +122,10 @@ const PHASE_COLORS = THEME.colors.phase;
  * light. And a single dim ember at the far corner keeps the diagonal from
  * dying into flat black, so the ground still has somewhere to go.
  *
- * The grain is not decoration. A large area of near-black on an OLED panel
- * shows visible banding wherever a gradient crosses it; the noise dithers those
- * steps out. It got stronger with this palette (0.30 -> 0.42) because the
- * darker the ground, the more the banding shows.
+ * There is deliberately no grain overlay. One was tried twice — an SVG
+ * feTurbulence filter (which react-native-svg does not implement on native, so
+ * it rendered nothing at all) and then a tiled noise texture (which did render,
+ * and looked worse). On this backdrop the gradient reads cleaner without it.
  */
 function SpaceBackdrop() {
   return (
@@ -146,32 +159,6 @@ function SpaceBackdrop() {
           <Stop offset="80%" stopColor={PALETTE.ground} stopOpacity="0" />
         </SvgLinearGradient>
 
-        {/* Grain, tiled as an SVG pattern.
-            GRAIN_TILE is in viewBox user units, NOT pixels, and that is the
-            whole point. React Native's <Image resizeMode="repeat"> tiles at the
-            texture's *dp* size, so a 64px texture becomes a 64dp tile and every
-            noise texel is smeared across dpr^2 physical pixels — 3x3 blocks on
-            these screens, which reads as blocky static with visible tiling
-            structure rather than as grain. A pattern lets the tile size be set
-            independently of the source resolution, so one texel can land on
-            roughly one physical pixel. */}
-        <Pattern
-          id="grainPattern"
-          x="0"
-          y="0"
-          width={GRAIN_TILE}
-          height={GRAIN_TILE}
-          patternUnits="userSpaceOnUse"
-        >
-          <SvgImage
-            href={{ uri: GRAIN_URI }}
-            x="0"
-            y="0"
-            width={GRAIN_TILE}
-            height={GRAIN_TILE}
-            preserveAspectRatio="none"
-          />
-        </Pattern>
       </Defs>
 
       {/* Black base layer */}
@@ -184,10 +171,6 @@ function SpaceBackdrop() {
       {/* Bottom atmospheric fade covering the area below the pill taskbar */}
       <Rect width="390" height="844" fill="url(#bottomFade)" />
 
-      {/* Grain last, over the whole composition. It is not decoration: a
-          near-black ground shows heavy gradient banding on OLED, and this is
-          what dithers it out. */}
-      <Rect width="390" height="844" fill="url(#grainPattern)" opacity={GRAIN_OPACITY} />
     </Svg>
   );
 }
@@ -671,6 +654,7 @@ const TAB_ICONS: Record<string, React.ComponentType<{ size?: number; color?: str
   hub: Home,
   notes: FileText,
   finances: Wallet,
+  ai: Sparkles,
   health: Activity,
   menu: Menu,
 };
@@ -678,7 +662,7 @@ const TAB_ICONS: Record<string, React.ComponentType<{ size?: number; color?: str
 
 // Hub sub-screens reachable from Hub cards (not on the tab bar). The device
 // back button and their on-screen back rows both return from these to the Hub.
-const HUB_SUBSCREENS = ['todos', 'milestones', 'complaints', 'bucket'];
+const HUB_SUBSCREENS = ['todos', 'milestones', 'complaints', 'bucket', 'health'];
 
 /** Side drawer width. Shared by the panel style and the drag maths. */
 const DRAWER_WIDTH = 280;
@@ -839,7 +823,7 @@ const BlinkingBucketRow = ({ item, getCreatorName, onToggle, onDelete }: { item:
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'hub' | 'notes' | 'finances' | 'health' | 'bucket' | 'todos' | 'complaints' | 'milestones'>('hub');
+  const [activeTab, setActiveTab] = useState<'hub' | 'notes' | 'finances' | 'health' | 'ai' | 'bucket' | 'todos' | 'complaints' | 'milestones'>('hub');
 
   // Typefaces. Only the six weights the design actually uses are loaded — each
   // extra static face is ~95 KB of bundle for no visual gain.
@@ -938,6 +922,36 @@ export default function App() {
     setForfeit: setStepForfeit,
     requestAccess: requestStepAccess,
   } = useSteps(coupleId, userId, partnerProfile?.id);
+  // --- Ideas (AI) ---
+  const [ideaPrompt, setIdeaPrompt] = useState('');
+  const [ideas, setIdeas] = useState<string[]>([]);
+  const [ideasLoading, setIdeasLoading] = useState(false);
+  const [ideasError, setIdeasError] = useState<string | null>(null);
+
+  const askForIdeas = async (starter?: string) => {
+    const prompt = (starter ?? ideaPrompt).trim();
+    if (!prompt || ideasLoading) return;
+    if (starter) setIdeaPrompt(starter);
+    Keyboard.dismiss();
+    setIdeasLoading(true);
+    setIdeasError(null);
+    // Clear the old batch so a slow request can't leave the previous answer
+    // sitting under a spinner as though it were the new one.
+    setIdeas([]);
+    const { ideas: next, error } = await generateIdeas(prompt);
+    setIdeas(next);
+    setIdeasError(error ?? null);
+    setIdeasLoading(false);
+  };
+
+  const saveIdeaToNotes = async (idea: string) => {
+    const ok = await addNote(idea);
+    Alert.alert(
+      ok ? 'Saved' : 'Not saved',
+      ok ? 'Added to your shared notes.' : 'Could not save that. Check connectivity.'
+    );
+  };
+
   const [stakesModalOpen, setStakesModalOpen] = useState(false);
   const [stakesDraft, setStakesDraft] = useState('');
   const welcomeAnim = useRef(new Animated.Value(0)).current;
@@ -2835,6 +2849,10 @@ export default function App() {
                         <CalendarHeart size={26} color={THEME.colors.primary} strokeWidth={2} />
                         <Text style={styles.navCardLabel}>Milestones</Text>
                       </TouchableOpacity>
+                      <TouchableOpacity style={styles.navCard} onPress={() => setActiveTab('health')} activeOpacity={0.85}>
+                        <Activity size={26} color={THEME.colors.primary} strokeWidth={2} />
+                        <Text style={styles.navCardLabel}>Health & Cycle</Text>
+                      </TouchableOpacity>
                     </View>
                     </FadeInUp>
 
@@ -2860,6 +2878,79 @@ export default function App() {
                 )}
 
                 {/* Collaborative Canvas Tab */}
+                {/* Ideas — a deliberately narrow assistant. It sends only what
+                    the user types: no moods, check-ins, cycle data or step
+                    history. See [[generateIdeas]]. */}
+                {activeTab === 'ai' && (
+                  <View style={styles.tabContent}>
+                    <GlassCard style={styles.sectionCard} blur={false}>
+                      <View style={styles.rowBetween}>
+                        <Text style={styles.sectionHeading}>IDEAS</Text>
+                        <Sparkles size={16} color={THEME.colors.primary} />
+                      </View>
+
+                      <TextInput
+                        style={[styles.input, { marginTop: 4 }]}
+                        placeholder="Ask for date ideas, gifts, something to say..."
+                        placeholderTextColor={THEME.ink[35]}
+                        value={ideaPrompt}
+                        onChangeText={setIdeaPrompt}
+                        onSubmitEditing={() => askForIdeas()}
+                        returnKeyType="search"
+                      />
+
+                      {/* Starters, because a blank box is the hardest prompt to
+                          answer. Each one runs immediately rather than just
+                          filling the field. */}
+                      <View style={styles.starterRow}>
+                        {IDEA_STARTERS.map((starter) => (
+                          <TouchableOpacity
+                            key={starter}
+                            style={styles.starterChip}
+                            onPress={() => askForIdeas(starter)}
+                            activeOpacity={0.85}
+                          >
+                            <Text style={styles.starterChipText}>{starter}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      <SubmitButton style={[styles.primaryButton, { marginTop: 14 }]} onPress={() => askForIdeas()}>
+                        <Text style={styles.primaryBtnText}>{ideasLoading ? 'THINKING...' : 'GET IDEAS'}</Text>
+                      </SubmitButton>
+                    </GlassCard>
+
+                    {ideasError ? (
+                      <GlassCard style={styles.sectionCard} blur={false}>
+                        <Text style={styles.ideaError}>{ideasError}</Text>
+                      </GlassCard>
+                    ) : null}
+
+                    {ideasLoading && ideas.length === 0 ? (
+                      <GlassCard style={styles.sectionCard} blur={false}>
+                        <Skeleton height={14} />
+                        <Skeleton height={14} style={{ marginTop: 12 }} delay={90} />
+                        <Skeleton width="72%" height={14} style={{ marginTop: 12 }} delay={180} />
+                      </GlassCard>
+                    ) : null}
+
+                    {ideas.map((idea, i) => (
+                      <FadeInUp key={`${idea}-${i}`} index={i}>
+                        <GlassCard style={styles.sectionCard} blur={false}>
+                          <Text style={styles.ideaText}>{idea}</Text>
+                          <TouchableOpacity
+                            style={styles.ideaSave}
+                            onPress={() => saveIdeaToNotes(idea)}
+                            activeOpacity={0.8}
+                          >
+                            <Text style={styles.ideaSaveText}>Save to shared notes</Text>
+                          </TouchableOpacity>
+                        </GlassCard>
+                      </FadeInUp>
+                    ))}
+                  </View>
+                )}
+
                 {activeTab === 'notes' && (
                   <View style={styles.tabContent}>
                     <GlassCard style={styles.sectionCard} blur={false}>
@@ -3801,7 +3892,7 @@ export default function App() {
               high elevation can't poke through the drawer's scrim/panel. */}
           {!isDrawerOpen && (
             <AnimatedTabBar
-              tabs={['hub', 'notes', 'finances', 'health', 'menu'] as const}
+              tabs={['hub', 'notes', 'finances', 'ai', 'menu'] as const}
               activeTab={activeTab}
               // `menu` is a dock item that isn't a screen: it opens the drawer
               // instead of switching tabs. activeTab therefore never becomes
@@ -4955,6 +5046,45 @@ const styles = StyleSheet.create({
   vocabLineWord: {
     fontFamily: FONTS.bold,
     color: THEME.colors.text,
+  },
+  starterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  starterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: THEME.borderRadius.round,
+    backgroundColor: THEME.glass.accent,
+    borderWidth: 1,
+    borderColor: alpha(THEME.colors.primary, 0.32),
+  },
+  starterChipText: {
+    fontFamily: FONTS.semibold,
+    fontSize: 12,
+    color: THEME.colors.text,
+  },
+  ideaText: {
+    fontFamily: FONTS.body,
+    fontSize: 14,
+    lineHeight: 21,
+    color: THEME.colors.text,
+  },
+  ideaSave: {
+    marginTop: 12,
+    alignSelf: 'flex-start',
+  },
+  ideaSaveText: {
+    fontFamily: FONTS.semibold,
+    fontSize: 12,
+    color: THEME.colors.primary,
+  },
+  ideaError: {
+    fontFamily: FONTS.body,
+    fontSize: 13,
+    color: THEME.colors.danger,
   },
   moodRow: {
     flexDirection: 'row',
