@@ -23,7 +23,7 @@ import {
 import { Calendar } from 'react-native-calendars';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
-import { Menu, Settings as SettingsIcon, LogOut, X, Heart, Check, Square, CheckSquare, Home, FileText, Wallet, Activity, ListChecks, MessageSquareWarning, ChevronLeft, Send, BookOpen, Sparkles, ScrollText, CalendarHeart, Flame, Footprints, Trophy } from 'lucide-react-native';
+import { Menu, Settings as SettingsIcon, LogOut, X, Heart, Check, Square, CheckSquare, Home, FileText, Wallet, Activity, ListChecks, MessageSquareWarning, ChevronLeft, Plus, Send, BookOpen, Sparkles, ScrollText, CalendarHeart, Flame, Footprints, Trophy } from 'lucide-react-native';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, RadialGradient, Rect, Stop } from 'react-native-svg';
 import * as Notifications from 'expo-notifications';
 import { TodoRecurrence, AppUpdate, Milestone, MilestoneRecurrence } from './src/types';
@@ -1666,6 +1666,32 @@ export default function App() {
     setNoteTyping(text.trim().length > 0);
   };
 
+  const [composerOpen, setComposerOpen] = useState(false);
+
+  /**
+   * Close the sheet and stop telling the partner we're typing.
+   *
+   * Without the explicit stop, dismissing the sheet mid-draft leaves their
+   * "Companion is active in shared notes..." banner up until the receiver's
+   * own 5s expiry — the indicator outliving the thing it describes.
+   */
+  const closeComposer = () => {
+    setComposerOpen(false);
+    setNoteTyping(false);
+  };
+
+  /** Add from the sheet, closing it only if the note actually saved. */
+  const submitNote = async () => {
+    const content = newNoteContent.trim();
+    if (!content) return;
+    await handleAddNote();
+    // handleAddNote restores the draft on failure, so an empty box means it
+    // went through; a still-populated one means the user should get the sheet
+    // back rather than lose what they wrote.
+    setComposerOpen(false);
+    setNoteTyping(false);
+  };
+
   const handleAddNote = async () => {
     const content = newNoteContent.trim();
     if (!content) return;
@@ -2953,22 +2979,22 @@ export default function App() {
 
                 {activeTab === 'notes' && (
                   <View style={styles.tabContent}>
-                    <GlassCard style={styles.sectionCard} blur={false}>
+                    {/* Header, not a composer. The inline textbox + button cost
+                        ~250px before a single note was visible — a quarter of
+                        the screen permanently spent on an action taken a few
+                        times a day, on a screen whose job is reading what is
+                        already there. The composer moved into a sheet behind
+                        this plus. */}
+                    <View style={styles.notesHeader}>
                       <Text style={styles.sectionHeading}>SHARED NOTES</Text>
-                      <TextInput
-                        multiline
-                        textAlignVertical="top"
-                        style={[styles.input, styles.noteInput]}
-                        value={newNoteContent}
-                        onChangeText={handleNoteDraftChange}
-                        onBlur={() => setNoteTyping(false)}
-                        placeholder="Write a note for both partners..."
-                        placeholderTextColor={THEME.ink[16]}
-                      />
-                      <SubmitButton style={styles.primaryButton} onPress={handleAddNote}>
-                        <Text style={styles.primaryBtnText}>Add Shared Note</Text>
-                      </SubmitButton>
-                    </GlassCard>
+                      <PressableScale
+                        style={styles.notesAddButton}
+                        scaleTo={0.88}
+                        onPress={() => setComposerOpen(true)}
+                      >
+                        <Plus size={22} color={THEME.colors.background} strokeWidth={2.8} />
+                      </PressableScale>
+                    </View>
 
                     <View style={styles.noteGrid}>
                       {notes.length === 0 ? (
@@ -3904,6 +3930,44 @@ export default function App() {
               }}
             />
           )}
+
+          {/* Note composer. A sheet rather than an inline box, so the notes
+              screen spends its space on notes. */}
+          <Modal
+            visible={composerOpen}
+            transparent
+            animationType="slide"
+            onRequestClose={closeComposer}
+          >
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              style={styles.settingsModalOverlay}
+            >
+              <GlassCard style={styles.settingsModalContent} tier="chrome" radius={24}>
+                <View style={styles.settingsHeader}>
+                  <Text style={styles.settingsTitle}>NEW SHARED NOTE</Text>
+                  <TouchableOpacity onPress={closeComposer} hitSlop={PRESS_HIT_SLOP}>
+                    <X size={22} color={THEME.colors.text} />
+                  </TouchableOpacity>
+                </View>
+
+                <TextInput
+                  multiline
+                  autoFocus
+                  textAlignVertical="top"
+                  style={[styles.input, styles.noteInput]}
+                  value={newNoteContent}
+                  onChangeText={handleNoteDraftChange}
+                  onBlur={() => setNoteTyping(false)}
+                  placeholder="Write a note for both partners..."
+                  placeholderTextColor={THEME.ink[35]}
+                />
+                <SubmitButton style={styles.primaryButton} onPress={submitNote}>
+                  <Text style={styles.primaryBtnText}>ADD NOTE</Text>
+                </SubmitButton>
+              </GlassCard>
+            </KeyboardAvoidingView>
+          </Modal>
 
           {/* Visual Calendar Modal */}
           <Modal
@@ -5130,6 +5194,22 @@ const styles = StyleSheet.create({
   },
   noteInput: {
     minHeight: 96,
+  },
+  notesHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: THEME.spacing.md,
+    paddingHorizontal: THEME.spacing.xs,
+  },
+  notesAddButton: {
+    width: 42,
+    height: 42,
+    borderRadius: THEME.borderRadius.round,
+    backgroundColor: THEME.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...THEME.shadow.glowAccent,
   },
   noteGrid: {
     flexDirection: 'row',
