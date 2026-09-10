@@ -3,6 +3,7 @@ import {
   StyleSheet,
   Text,
   View,
+  Image,
   TextInput,
   TouchableOpacity,
   ScrollView,
@@ -23,7 +24,7 @@ import { Calendar } from 'react-native-calendars';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
 import { Menu, Settings as SettingsIcon, LogOut, X, Heart, Check, Square, CheckSquare, Home, FileText, Wallet, Activity, ListChecks, MessageSquareWarning, ChevronLeft, Send, BookOpen, Sparkles, ScrollText, CalendarHeart, Flame, Footprints, Trophy } from 'lucide-react-native';
-import Svg, { Defs, LinearGradient as SvgLinearGradient, RadialGradient, Rect, Stop, Filter, FeTurbulence, FeColorMatrix, FeComposite } from 'react-native-svg';
+import Svg, { Defs, LinearGradient as SvgLinearGradient, RadialGradient, Rect, Stop } from 'react-native-svg';
 import * as Notifications from 'expo-notifications';
 import { TodoRecurrence, AppUpdate, Milestone, MilestoneRecurrence } from './src/types';
 import { useAuth } from './src/hooks/useAuth';
@@ -71,6 +72,7 @@ import { Manrope_600SemiBold } from '@expo-google-fonts/manrope/600SemiBold';
 import { Manrope_700Bold } from '@expo-google-fonts/manrope/700Bold';
 import { Manrope_800ExtraBold } from '@expo-google-fonts/manrope/800ExtraBold';
 import { alpha, FONTS, PALETTE, THEME } from './src/constants/theme';
+import { GRAIN_URI } from './src/constants/grain';
 import { SPRING, projectMomentum } from './src/constants/motion';
 import { useReducedMotion } from './src/hooks/useReducedMotion';
 
@@ -115,6 +117,7 @@ const PHASE_COLORS = THEME.colors.phase;
  */
 function SpaceBackdrop() {
   return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
     <Svg pointerEvents="none" style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox="0 0 390 844" preserveAspectRatio="xMidYMid slice">
       <Defs>
         {/* Key light: neon orange spilling in from beyond the top-left corner */}
@@ -145,12 +148,6 @@ function SpaceBackdrop() {
           <Stop offset="80%" stopColor={PALETTE.ground} stopOpacity="0" />
         </SvgLinearGradient>
 
-        {/* High-fidelity SVG grain noise filter overlay */}
-        <Filter id="noiseFilter">
-          <FeTurbulence type="fractalNoise" baseFrequency="0.68" numOctaves="4" stitchTiles="stitch" result="noise" />
-          <FeColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.065 0" />
-          <FeComposite operator="in" in2="SourceGraphic" />
-        </Filter>
       </Defs>
 
       {/* Black base layer */}
@@ -163,9 +160,17 @@ function SpaceBackdrop() {
       {/* Bottom atmospheric fade covering the area below the pill taskbar */}
       <Rect width="390" height="844" fill="url(#bottomFade)" />
 
-      {/* Grain — dithers the gradient banding that near-black shows on OLED */}
-      <Rect width="390" height="844" fill={THEME.ink[95]} filter="url(#noiseFilter)" opacity="0.42" />
     </Svg>
+
+      {/* Grain, tiled as a real texture rather than an SVG filter — see
+          [[GRAIN_URI]] for why the filter approach silently rendered nothing.
+          It dithers the gradient banding that near-black shows on OLED. */}
+      <Image
+        source={{ uri: GRAIN_URI }}
+        resizeMode="repeat"
+        style={[StyleSheet.absoluteFill, { opacity: 0.16 }]}
+      />
+    </View>
   );
 }
 
@@ -649,7 +654,9 @@ const TAB_ICONS: Record<string, React.ComponentType<{ size?: number; color?: str
   notes: FileText,
   finances: Wallet,
   health: Activity,
+  menu: Menu,
 };
+
 
 // Hub sub-screens reachable from Hub cards (not on the tab bar). The device
 // back button and their on-screen back rows both return from these to the Hub.
@@ -2401,19 +2408,6 @@ export default function App() {
       ) : (
         <View style={{ flex: 1 }}>
             <SafeAreaView style={{ flex: 1 }}>
-              {/* The drawer menu is a Hub-level affordance — only surface the
-                  hamburger on the home tab. Other tabs / sub-screens rely on the
-                  device back button (and their own back rows). */}
-              {activeTab === 'hub' && (
-                <TouchableOpacity
-                  style={styles.floatingMenuButton}
-                  onPress={() => toggleDrawer(true)}
-                  activeOpacity={0.8}
-                >
-                  <Menu color={THEME.colors.primary} size={22} />
-                </TouchableOpacity>
-              )}
-
               {/* A downloaded OTA bundle only takes effect on reload. Offer it
                   rather than yanking the app out from under the user. */}
               {otaUpdateReady && (
@@ -2434,8 +2428,11 @@ export default function App() {
                   style={styles.scrollArea}
                   contentContainerStyle={{
                     padding: THEME.spacing.md,
-                    paddingTop: 56,
-                    paddingBottom: 220
+                    // Was 56 to clear the floating hamburger, which now lives in
+                    // the dock. Was 220 at the bottom *on top of* tabContent's
+                    // own 140 — 360px of dead space to clear a 66px bar.
+                    paddingTop: 20,
+                    paddingBottom: 24
                   }}
                   keyboardShouldPersistTaps="handled"
                 >
@@ -2484,6 +2481,29 @@ export default function App() {
                       )}
                       <View style={styles.suggestionContainer}>
                         <Text style={styles.welcomeCopy}>{relationshipAdvice}</Text>
+                      </View>
+
+                      {/* Your own mood lives here rather than in a card of its
+                          own at the bottom of the hub. Both moods belong to the
+                          same question — how are the two of you today — and
+                          splitting them put the answer and the input three
+                          screens apart. */}
+                      <View style={styles.myMoodRow}>
+                        <Text style={styles.myMoodLabel}>YOU</Text>
+                        <View style={styles.moodRow}>
+                          {['Happy', 'Overwhelmed', 'Exhausted', 'Low Energy'].map((m) => (
+                            <TouchableOpacity
+                              key={m}
+                              style={[
+                                styles.moodBtn,
+                                currentMood === m && { backgroundColor: THEME.glass.accentStrong, ...THEME.shadow.glowAccent }
+                              ]}
+                              onPress={() => updateMood(m)}
+                            >
+                              <Text style={styles.moodBtnText}>{m}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
                       </View>
                     </GlassCard>
                     </FadeInUp>
@@ -2804,39 +2824,19 @@ export default function App() {
                       const w = getWordOfDay();
                       return (
                         <FadeInUp index={3}>
-                        <GlassCard style={styles.sectionCard} blur={false}>
-                          <View style={styles.rowBetween}>
-                            <Text style={styles.sectionHeading}>WORD OF THE DAY</Text>
-                            <BookOpen size={16} color={THEME.colors.primary} />
-                          </View>
-                          <Text style={styles.vocabWord}>{w.word}</Text>
-                          <Text style={styles.vocabMeaning}>{w.meaning}</Text>
-                          {w.example ? <Text style={styles.vocabExample}>“{w.example}”</Text> : null}
-                        </GlassCard>
+                        {/* A whole card for a word nobody acts on was a third of
+                            a screen. One line keeps the daily habit without
+                            spending the hub's most valuable space on it. */}
+                        <View style={styles.vocabLine}>
+                          <BookOpen size={13} color={THEME.colors.primary} />
+                          <Text style={styles.vocabLineText} numberOfLines={1}>
+                            <Text style={styles.vocabLineWord}>{w.word}</Text>
+                            {'  '}{w.meaning}
+                          </Text>
+                        </View>
                         </FadeInUp>
                       );
                     })()}
-
-                    {/* Mood Selector Updates */}
-                    <FadeInUp index={4}>
-                    <GlassCard style={styles.sectionCard} blur={false}>
-                      <Text style={styles.sectionHeading}>UPDATE MY EMOTIONAL CAPACITY</Text>
-                      <View style={styles.moodRow}>
-                        {['Happy', 'Overwhelmed', 'Exhausted', 'Low Energy'].map((m) => (
-                          <TouchableOpacity
-                            key={m}
-                            style={[
-                              styles.moodBtn,
-                              currentMood === m && { backgroundColor: THEME.glass.accentStrong, ...THEME.shadow.glowAccent }
-                            ]}
-                            onPress={() => updateMood(m)}
-                          >
-                            <Text style={styles.moodBtnText}>{m}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    </GlassCard>
-                    </FadeInUp>
                   </View>
                 )}
 
@@ -3782,9 +3782,16 @@ export default function App() {
               high elevation can't poke through the drawer's scrim/panel. */}
           {!isDrawerOpen && (
             <AnimatedTabBar
-              tabs={['hub', 'notes', 'finances', 'health'] as const}
+              tabs={['hub', 'notes', 'finances', 'health', 'menu'] as const}
               activeTab={activeTab}
-              onChange={setActiveTab}
+              // `menu` is a dock item that isn't a screen: it opens the drawer
+              // instead of switching tabs. activeTab therefore never becomes
+              // 'menu', which is also why the sliding indicator still behaves —
+              // it simply never lands on this slot.
+              onChange={(t) => {
+                if (t === 'menu') toggleDrawer(true);
+                else setActiveTab(t);
+              }}
             />
           )}
 
@@ -4440,7 +4447,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   tabContent: {
-    paddingBottom: 140,
+    // Clears the floating dock (66px tall, sitting TAB_BAR_BOTTOM off the
+    // bottom) with a little breathing room — not the 140 it used to carry on
+    // top of the ScrollView's own 220.
+    paddingBottom: 96,
   },
   welcomeCard: {
     paddingHorizontal: THEME.spacing.xs,
@@ -4895,6 +4905,36 @@ const styles = StyleSheet.create({
     color: THEME.colors.textMuted,
     fontSize: 11,
     marginTop: 2,
+  },
+  myMoodRow: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: alpha(THEME.ink[95], 0.08),
+  },
+  myMoodLabel: {
+    fontSize: 10,
+    fontFamily: FONTS.heavy,
+    letterSpacing: 1.4,
+    color: THEME.colors.textFaint,
+    marginBottom: 8,
+  },
+  vocabLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 4,
+    marginBottom: THEME.spacing.md,
+  },
+  vocabLineText: {
+    flex: 1,
+    fontSize: 12,
+    fontFamily: FONTS.body,
+    color: THEME.colors.textMuted,
+  },
+  vocabLineWord: {
+    fontFamily: FONTS.bold,
+    color: THEME.colors.text,
   },
   moodRow: {
     flexDirection: 'row',
@@ -5674,19 +5714,6 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
-  },
-  floatingMenuButton: {
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 12 : 16,
-    left: 16,
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: alpha(THEME.colors.charcoal, 0.82),
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 50,
-    ...THEME.shadow.soft,
   },
   drawerBackdrop: {
     position: 'absolute',
