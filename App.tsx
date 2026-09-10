@@ -90,32 +90,57 @@ const MILESTONE_EMOJIS = ['💛', '💍', '🌹', '🎉', '✈️', '🏡', '�
 
 const PHASE_COLORS = THEME.colors.phase;
 
+/**
+ * The ground: one neon-orange source burning in the top-left corner, falling
+ * away along the diagonal into black, with grain over the whole thing.
+ *
+ * Three details do most of the work:
+ *
+ * The light is anchored *off-canvas* (cx -6%, cy -4%) rather than at the
+ * corner. A radial gradient centred exactly on the corner puts its hottest,
+ * flattest point on screen and reads as a sticker; pushing the origin just
+ * outside means only the falloff is visible, which is what an actual light
+ * source spilling in from beyond the frame looks like.
+ *
+ * The stops are front-loaded — most of the drop happens in the first 30% —
+ * because linear falloff over a whole screen reads as a wash rather than as
+ * light. And a single dim ember at the far corner keeps the diagonal from
+ * dying into flat black, so the ground still has somewhere to go.
+ *
+ * The grain is not decoration. A large area of near-black on an OLED panel
+ * shows visible banding wherever a gradient crosses it; the noise dithers those
+ * steps out. It got stronger with this palette (0.30 -> 0.42) because the
+ * darker the ground, the more the banding shows.
+ */
 function SpaceBackdrop() {
   return (
     <Svg pointerEvents="none" style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox="0 0 390 844" preserveAspectRatio="xMidYMid slice">
       <Defs>
-        {/* Warm lime/moss light falling from the top-right into deep forest */}
-        <RadialGradient id="topRightGlow" cx="92%" cy="4%" r="115%" fx="92%" fy="4%">
-          <Stop offset="0%" stopColor={PALETTE.lime} stopOpacity="0.42" />
-          <Stop offset="26%" stopColor={PALETTE.moss} stopOpacity="0.30" />
-          <Stop offset="60%" stopColor={PALETTE.forest} stopOpacity="0.16" />
-          <Stop offset="100%" stopColor={PALETTE.forestDeep} stopOpacity="0" />
+        {/* Key light: neon orange spilling in from beyond the top-left corner */}
+        <RadialGradient id="cornerBurn" cx="-6%" cy="-4%" r="135%" fx="-6%" fy="-4%">
+          <Stop offset="0%" stopColor={PALETTE.accent} stopOpacity="0.95" />
+          <Stop offset="9%" stopColor={PALETTE.accent} stopOpacity="0.62" />
+          <Stop offset="20%" stopColor={PALETTE.accent} stopOpacity="0.30" />
+          <Stop offset="34%" stopColor={PALETTE.accentHot} stopOpacity="0.13" />
+          <Stop offset="52%" stopColor={PALETTE.accentHot} stopOpacity="0.05" />
+          <Stop offset="72%" stopColor={PALETTE.ground} stopOpacity="0" />
         </RadialGradient>
 
-        {/* Cooler counter-light from the lower left, so the ground isn't flat */}
-        <RadialGradient id="bottomLeftGlow" cx="4%" cy="88%" r="95%" fx="4%" fy="88%">
-          <Stop offset="0%" stopColor={PALETTE.forest} stopOpacity="0.34" />
-          <Stop offset="55%" stopColor={PALETTE.forest} stopOpacity="0.10" />
-          <Stop offset="100%" stopColor={PALETTE.forestDeep} stopOpacity="0" />
+        {/* A last ember at the far corner, so the diagonal has an end and not
+            just an absence. Barely perceptible on its own. */}
+        <RadialGradient id="farEmber" cx="104%" cy="102%" r="72%" fx="104%" fy="102%">
+          <Stop offset="0%" stopColor={PALETTE.accentHot} stopOpacity="0.10" />
+          <Stop offset="46%" stopColor={PALETTE.accentHot} stopOpacity="0.03" />
+          <Stop offset="100%" stopColor={PALETTE.ground} stopOpacity="0" />
         </RadialGradient>
 
         {/* Bottom fade so content sinks away behind the floating tab dock */}
         <SvgLinearGradient id="bottomFade" x1="0%" y1="100%" x2="0%" y2="0%">
-          <Stop offset="0%" stopColor={PALETTE.forestDeep} stopOpacity="1.0" />
-          <Stop offset="28%" stopColor={PALETTE.forestDeep} stopOpacity="1.0" />
-          <Stop offset="38%" stopColor={PALETTE.forestDeep} stopOpacity="0.95" />
-          <Stop offset="55%" stopColor={PALETTE.forestDeep} stopOpacity="0.40" />
-          <Stop offset="80%" stopColor={PALETTE.forestDeep} stopOpacity="0" />
+          <Stop offset="0%" stopColor={PALETTE.ground} stopOpacity="1.0" />
+          <Stop offset="28%" stopColor={PALETTE.ground} stopOpacity="1.0" />
+          <Stop offset="38%" stopColor={PALETTE.ground} stopOpacity="0.95" />
+          <Stop offset="55%" stopColor={PALETTE.ground} stopOpacity="0.40" />
+          <Stop offset="80%" stopColor={PALETTE.ground} stopOpacity="0" />
         </SvgLinearGradient>
 
         {/* High-fidelity SVG grain noise filter overlay */}
@@ -126,18 +151,18 @@ function SpaceBackdrop() {
         </Filter>
       </Defs>
 
-      {/* Deep forest base layer */}
-      <Rect width="390" height="844" fill={PALETTE.forestDeep} />
+      {/* Black base layer */}
+      <Rect width="390" height="844" fill={PALETTE.ground} />
 
-      {/* Key light and counter-light */}
-      <Rect width="390" height="844" fill="url(#topRightGlow)" />
-      <Rect width="390" height="844" fill="url(#bottomLeftGlow)" />
+      {/* The diagonal: burn in the top-left, ember in the bottom-right */}
+      <Rect width="390" height="844" fill="url(#cornerBurn)" />
+      <Rect width="390" height="844" fill="url(#farEmber)" />
 
       {/* Bottom atmospheric fade covering the area below the pill taskbar */}
       <Rect width="390" height="844" fill="url(#bottomFade)" />
 
-      {/* Tactical grain overlay blending the background with noise */}
-      <Rect width="390" height="844" fill={PALETTE.cream} filter="url(#noiseFilter)" opacity="0.30" />
+      {/* Grain — dithers the gradient banding that near-black shows on OLED */}
+      <Rect width="390" height="844" fill={THEME.ink[95]} filter="url(#noiseFilter)" opacity="0.42" />
     </Svg>
   );
 }
@@ -2234,10 +2259,13 @@ export default function App() {
       <Breathing style={StyleSheet.absoluteFill} from={0.35} to={0.9} duration={5200}>
         <Svg pointerEvents="none" width="100%" height="100%" viewBox="0 0 390 844" preserveAspectRatio="xMidYMid slice">
           <Defs>
-            <RadialGradient id="ambientPulse" cx="78%" cy="16%" r="72%" fx="78%" fy="16%">
-              <Stop offset="0%" stopColor={PALETTE.lime} stopOpacity="0.20" />
-              <Stop offset="55%" stopColor={PALETTE.moss} stopOpacity="0.07" />
-              <Stop offset="100%" stopColor={PALETTE.forestDeep} stopOpacity="0" />
+            {/* Sits on the key light, not opposite it — a corner source that
+                breathes reads as the light itself flickering, whereas a pulse
+                somewhere else reads as a second, unexplained lamp. */}
+            <RadialGradient id="ambientPulse" cx="4%" cy="8%" r="78%" fx="4%" fy="8%">
+              <Stop offset="0%" stopColor={PALETTE.accent} stopOpacity="0.22" />
+              <Stop offset="45%" stopColor={PALETTE.accent} stopOpacity="0.07" />
+              <Stop offset="100%" stopColor={PALETTE.ground} stopOpacity="0" />
             </RadialGradient>
           </Defs>
           <Rect width="390" height="844" fill="url(#ambientPulse)" />

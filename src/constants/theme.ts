@@ -1,35 +1,41 @@
 /**
  * NOVIA design tokens.
  *
- * Palette is built from five source colours:
- *   #0E9594 teal   #F24722 ember   #2D3047 slate   #E0E2DB mist   #EDEDF4 paper
+ * One hue, on black. Neon orange (#FF6A00) is the only chromatic colour in the
+ * app; everything else is a warm neutral. The discipline is the point — with a
+ * single accent, orange always means "this is the thing that matters", and the
+ * eye never has to work out which of four colours is the important one.
  *
- * The app keeps its neumorphic + glassmorphic language — depth comes from
- * translucent fills and soft layered shadows, never from hard outlines — on a
- * cool slate ground with near-white type. Teal is the calm primary (CTAs,
- * active states); ember (orange-red) is reserved for destructive / alert
- * moments; a warm amber fills the "warning/gold" slot.
+ * The consequence to design around: **hue is no longer available to carry
+ * meaning.** Success, warning and danger cannot be green/amber/red. States are
+ * distinguished by *intensity* instead — saturated accent for hot, warm greys
+ * falling away for cold — backed by icons and explicit wording wherever the
+ * distinction actually matters (delete, unpair, sign out). Intensity has the
+ * side benefit of surviving greyscale and colour-vision deficiency, which the
+ * old five-hue mood and phase scales did not.
  *
- * NOTE: the PALETTE keys below keep their original names (forest, moss, lime …)
- * so the ~60 `PALETTE.*` references in App.tsx keep resolving — only the hex
- * values changed. Think of the keys as slots, not literal hues:
- *   forest → slate   moss → teal   lime → teal(primary)   brick → ember
+ * Depth comes from translucent fills, a lit rim and layered shadow — see
+ * `material` at the bottom, and GlassCard for the specular treatment.
  */
 
 // Raw palette. Prefer the semantic tokens below in components; reach for these
-// only when you need a specific hue (e.g. charts, phase indicators).
+// only when you need a specific hue (e.g. gradients, phase indicators).
+//
+// One accent, on black. Everything that is not the accent is a neutral — there
+// are no second and third hues competing for attention, so the orange always
+// means "this is the thing". The keys are named for what they are; the previous
+// set (forest / moss / lime) were slots whose names had stopped describing
+// their values, which is how a palette rots.
 export const PALETTE = {
-  forest: '#2D3047',   // slate — brand base (gradients, neutral tones)
-  moss: '#0E9594',     // teal — secondary accent / success / info
-  lime: '#0E9594',     // teal — PRIMARY accent, CTAs, active states
-  cream: '#EDEDF4',    // paper — type / light ink
-  brick: '#F24722',    // ember — destructive / alert
+  ground: '#050505',   // app background — near-black, not pure, so shadow still reads
+  panel: '#121110',    // raised panels
+  well: '#1A1815',     // pressed / inset wells
 
-  // Derived shades that keep the ground dark enough for paper text to sit at a
-  // comfortable contrast ratio.
-  forestDeep: '#1E2030',   // app background
-  forestNight: '#262A40',  // raised panels
-  forestSoft: '#2D3047',   // pressed / inset wells
+  accent: '#FF6A00',   // neon orange — PRIMARY: CTAs, active states, emphasis
+  accentHot: '#FF3D00', // destructive / alert — hotter and redder than the accent
+  accentWarm: '#FFA640', // warning / caution — softer, more amber
+
+  ink: '#F6F2EE',      // type / light ink, warmed a touch to sit with the orange
 } as const;
 
 /**
@@ -70,16 +76,22 @@ export const FONTS = {
  * The number is roughly the perceived lightness against the app's ground, so
  * `ink[95]` is body copy and `ink[35]` is a placeholder. Pick by role, not by
  * eye: text you must read is 70 or above, text you may ignore is 50 or below.
+ *
+ * The ramp is warm, not neutral. A pure grey next to a saturated orange reads
+ * as unrelated — as though the two came from different designs. Biasing every
+ * step very slightly toward the accent (R > G > B by a few points) makes the
+ * neutrals read as chosen rather than defaulted, without any step looking
+ * tinted on its own.
  */
 export const INK = {
-  100: '#F4F5FA', // emphasis — brighter than body, used sparingly
-  95: '#EDEDF4', // primary text
-  70: '#C6CAD6', // secondary text
-  55: '#9AA0B6',
-  50: '#8B90A4', // muted / metadata
-  35: '#5A6078', // placeholder text
-  22: '#3A3F55',
-  16: '#2B2F44', // hairlines, barely-there fills
+  100: '#FFFFFF', // emphasis — brighter than body, used sparingly
+  95: '#F6F2EE', // primary text
+  70: '#C6BFB8', // secondary text
+  55: '#968E87',
+  50: '#807871', // muted / metadata
+  35: '#56514C', // placeholder text
+  22: '#36322E',
+  16: '#24211F', // hairlines, barely-there fills
   0: '#000000',
 } as const;
 
@@ -103,45 +115,53 @@ export const THEME = {
   fonts: FONTS,
   ink: INK,
   colors: {
-    background: PALETTE.forestDeep,
-    surface: 'rgba(237, 237, 244, 0.06)',   // paper-tinted glass
-    border: 'rgba(237, 237, 244, 0.14)',    // used sparingly; prefer shadow for depth
-    text: PALETTE.cream,
-    textMuted: 'rgba(237, 237, 244, 0.62)',
-    textFaint: 'rgba(237, 237, 244, 0.38)',
+    background: PALETTE.ground,
+    surface: alpha(INK[95], 0.06),   // ink-tinted glass
+    border: alpha(INK[95], 0.14),    // used sparingly; prefer shadow for depth
+    text: INK[95],
+    textMuted: alpha(INK[95], 0.62),
+    textFaint: alpha(INK[95], 0.38),
 
-    primary: PALETTE.lime,       // main accent, CTAs, active states (teal)
-    accent: '#3FB8B0',           // secondary accent — brighter teal, distinct from primary
-    rust: PALETTE.brick,         // destructive / alert (ember)
-    charcoal: PALETTE.forestNight,
-    forest: PALETTE.forest,
-    cream: PALETTE.cream,
+    primary: PALETTE.accent,     // main accent, CTAs, active states
+    accent: PALETTE.accentWarm,  // secondary emphasis — softer, more amber
+    rust: PALETTE.accentHot,     // destructive / alert
+    charcoal: PALETTE.panel,
+    forest: PALETTE.well,
+    cream: INK[95],
 
-    // Mood states, pulled into the palette's range.
+    /*
+     * Mood and phase used to be five distinct hues each. On a single-accent
+     * palette that is no longer available — and it was never the strongest
+     * encoding anyway, since hue alone is the channel most people lose to
+     * colour-vision deficiency.
+     *
+     * Both scales now run on *intensity* instead: saturated orange at the hot
+     * end, falling through warm greys to almost nothing at the cold end. That
+     * survives the palette, reads correctly in greyscale, and puts the brightest
+     * value on the state that most wants attention.
+     */
     mood: {
-      Happy: PALETTE.moss,
-      Overwhelmed: PALETTE.brick,
-      Exhausted: '#5A6178',
-      'Low Energy': '#E0A458',
-      Neutral: '#8A90A4',
+      Happy: PALETTE.accent,
+      Overwhelmed: PALETTE.accentHot,
+      Exhausted: INK[35],
+      'Low Energy': INK[50],
+      Neutral: INK[55],
     },
 
     // Menstrual cycle phases. All entries must stay 6-digit hex — call sites
     // append a hex alpha suffix (e.g. `+ '26'`), which an rgba() string breaks.
     phase: {
-      // Rose — distinct from the teal primary and the ember danger, still reads
-      // as "period" and stays readable on the dark ground.
-      Menstruation: '#E0576E',
-      Follicular: PALETTE.moss,
-      Ovulation: '#E0A458',
-      Luteal: '#9C6B9E',
-      Unknown: '#5A6178',
+      Menstruation: PALETTE.accentHot,
+      Follicular: PALETTE.accent,
+      Ovulation: PALETTE.accentWarm,
+      Luteal: INK[50],
+      Unknown: INK[35],
     },
 
-    success: '#3FB8B0',          // positive / "owed to you" — brighter teal, not the primary teal
-    warning: '#E0A458',
-    danger: PALETTE.brick,
-    info: PALETTE.moss,
+    success: PALETTE.accent,
+    warning: PALETTE.accentWarm,
+    danger: PALETTE.accentHot,
+    info: PALETTE.accent,
   },
   spacing: {
     xs: 4,
@@ -165,14 +185,14 @@ export const THEME = {
   // surfaces should use — reach for a bare fill only when you need a tint on
   // something that isn't a pane of glass.
   glass: {
-    surface: 'rgba(237, 237, 244, 0.075)',       // resting frosted glass
-    surfaceStrong: 'rgba(237, 237, 244, 0.115)', // raised / interactive glass
-    inset: 'rgba(0, 0, 0, 0.28)',                // carved-in wells (inputs, nested rows)
-    accent: 'rgba(14, 149, 148, 0.16)',          // active / selected tint (teal)
-    accentStrong: 'rgba(14, 149, 148, 0.24)',
-    moss: 'rgba(14, 149, 148, 0.16)',            // teal tint
-    danger: 'rgba(242, 71, 34, 0.16)',
-    success: 'rgba(63, 184, 176, 0.13)',
+    surface: alpha(INK[95], 0.075),   // resting frosted glass
+    surfaceStrong: alpha(INK[95], 0.115), // raised / interactive glass
+    inset: alpha(INK[0], 0.28),     // carved-in wells (inputs, nested rows)
+    accent: alpha(PALETTE.accent, 0.16),  // active / selected tint
+    accentStrong: alpha(PALETTE.accent, 0.24),
+    moss: alpha(PALETTE.accent, 0.16),            // legacy alias for the accent tint
+    danger: alpha(PALETTE.accentHot, 0.16),
+    success: alpha(PALETTE.accent, 0.13),
   },
 
   /**
@@ -189,11 +209,11 @@ export const THEME = {
    * dark rim that reads as cut *into* a surface rather than raised off it.
    */
   rim: {
-    edge: 'rgba(237, 237, 244, 0.13)',
-    edgeBright: 'rgba(237, 237, 244, 0.17)',
-    edgeFaint: 'rgba(237, 237, 244, 0.10)',
-    carved: 'rgba(0, 0, 0, 0.34)',
-    accent: 'rgba(14, 149, 148, 0.42)',
+    edge: alpha(INK[95], 0.13),
+    edgeBright: alpha(INK[95], 0.17),
+    edgeFaint: alpha(INK[95], 0.10),
+    carved: alpha(INK[0], 0.34),
+    accent: alpha(PALETTE.accent, 0.42),
   },
 
   // Soft-UI shadow presets. Large, diffuse shadows lift glass off the deep
@@ -231,14 +251,14 @@ export const THEME = {
       elevation: 0,
     },
     glowAccent: {
-      shadowColor: PALETTE.lime,
+      shadowColor: PALETTE.accent,
       shadowOpacity: 0.42,
       shadowRadius: 22,
       shadowOffset: { width: 0, height: 10 },
       elevation: 0,
     },
     glowDanger: {
-      shadowColor: PALETTE.brick,
+      shadowColor: PALETTE.accentHot,
       shadowOpacity: 0.40,
       shadowRadius: 20,
       shadowOffset: { width: 0, height: 10 },
@@ -271,9 +291,9 @@ export const THEME = {
   material: {
     /** Faint grouping *inside* an already-glass card. */
     thin: {
-      backgroundColor: 'rgba(237, 237, 244, 0.045)',
+      backgroundColor: alpha(INK[95], 0.045),
       borderWidth: 1,
-      borderColor: 'rgba(237, 237, 244, 0.10)',
+      borderColor: alpha(INK[95], 0.10),
       shadowColor: '#000000',
       shadowOpacity: 0.24,
       shadowRadius: 10,
@@ -282,9 +302,9 @@ export const THEME = {
     },
     /** The standard content card. */
     regular: {
-      backgroundColor: 'rgba(237, 237, 244, 0.075)',
+      backgroundColor: alpha(INK[95], 0.075),
       borderWidth: 1,
-      borderColor: 'rgba(237, 237, 244, 0.13)',
+      borderColor: alpha(INK[95], 0.13),
       shadowColor: '#000000',
       shadowOpacity: 0.36,
       shadowRadius: 22,
@@ -293,9 +313,9 @@ export const THEME = {
     },
     /** Raised and interactive — sits closest to the viewer. */
     thick: {
-      backgroundColor: 'rgba(237, 237, 244, 0.115)',
+      backgroundColor: alpha(INK[95], 0.115),
       borderWidth: 1,
-      borderColor: 'rgba(237, 237, 244, 0.17)',
+      borderColor: alpha(INK[95], 0.17),
       shadowColor: '#000000',
       shadowOpacity: 0.42,
       shadowRadius: 26,
@@ -304,9 +324,9 @@ export const THEME = {
     },
     /** Structural chrome: tab dock, drawer, modal cards. Darker than content. */
     chrome: {
-      backgroundColor: 'rgba(32, 35, 52, 0.94)',
+      backgroundColor: alpha(PALETTE.panel, 0.94),
       borderWidth: 1,
-      borderColor: 'rgba(237, 237, 244, 0.11)',
+      borderColor: alpha(INK[95], 0.11),
       shadowColor: '#000000',
       shadowOpacity: 0.46,
       shadowRadius: 34,
@@ -315,9 +335,9 @@ export const THEME = {
     },
     /** Carved into the surface above it: inputs, nested rows, nav tiles. */
     well: {
-      backgroundColor: 'rgba(0, 0, 0, 0.28)',
+      backgroundColor: alpha(INK[0], 0.28),
       borderWidth: 1,
-      borderColor: 'rgba(0, 0, 0, 0.34)',
+      borderColor: alpha(INK[0], 0.34),
     },
   },
 } as const;
