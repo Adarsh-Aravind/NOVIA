@@ -174,10 +174,20 @@ export interface StepSeason {
   champion: StepLeader; // current standing (leader of completed days this quarter)
 }
 
+/** One day in the duel graph. `null` means that side never synced that day. */
+export interface StepDay {
+  date: string; // 'YYYY-MM-DD'
+  me: number | null;
+  partner: number | null;
+  isToday: boolean;
+}
+
 export interface UseStepsResult {
   // Today's duel.
   mySteps: number;
   partnerSteps: number;
+  /** The last seven days, oldest first. Always length 7, gaps included. */
+  series: StepDay[];
   status: StepsStatus;
   loading: boolean;
   leader: StepLeader;
@@ -208,6 +218,7 @@ export function useSteps(
   const [mySteps, setMySteps] = useState(0);
   const [partnerSteps, setPartnerSteps] = useState(0);
   const [partnerSynced, setPartnerSynced] = useState(false);
+  const [series, setSeries] = useState<StepDay[]>([]);
   const [status, setStatus] = useState<StepsStatus>('loading');
   const [season, setSeason] = useState<StepSeason>(emptySeason);
   const [streakHolder, setStreakHolder] = useState<StepSide>(null);
@@ -280,6 +291,27 @@ export function useSteps(
       setPartnerSteps(partnerToday ?? 0);
       setPartnerSynced(partnerToday != null);
     }
+
+    // The last seven days, oldest first, for the duel graph.
+    //
+    // Built by walking back from today rather than by reading off the rows,
+    // so a day neither of you synced still occupies its slot. Without that the
+    // graph silently closes the gap and a missed Tuesday reads as though it
+    // never happened — the bars would shift and the shape would lie.
+    const week: StepDay[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const iso = toLocalISODate(d);
+      const slot = byDate.get(iso);
+      week.push({
+        date: iso,
+        me: slot?.me ?? null,
+        partner: slot?.partner ?? null,
+        isToday: iso === today,
+      });
+    }
+    if (mounted.current) setSeries(week);
 
     // Season tally + streak over *completed* contested days (both synced, no tie).
     const decided: { date: string; winner: 'me' | 'partner' }[] = [];
@@ -511,6 +543,7 @@ export function useSteps(
   return {
     mySteps,
     partnerSteps,
+    series,
     status,
     loading: status === 'loading',
     leader,
