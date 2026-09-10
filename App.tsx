@@ -118,13 +118,14 @@ function SpaceBackdrop() {
     <Svg pointerEvents="none" style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox="0 0 390 844" preserveAspectRatio="xMidYMid slice">
       <Defs>
         {/* Key light: neon orange spilling in from beyond the top-left corner */}
-        <RadialGradient id="cornerBurn" cx="-6%" cy="-4%" r="135%" fx="-6%" fy="-4%">
-          <Stop offset="0%" stopColor={PALETTE.accent} stopOpacity="0.95" />
-          <Stop offset="9%" stopColor={PALETTE.accent} stopOpacity="0.62" />
-          <Stop offset="20%" stopColor={PALETTE.accent} stopOpacity="0.30" />
-          <Stop offset="34%" stopColor={PALETTE.accentHot} stopOpacity="0.13" />
-          <Stop offset="52%" stopColor={PALETTE.accentHot} stopOpacity="0.05" />
-          <Stop offset="72%" stopColor={PALETTE.ground} stopOpacity="0" />
+        <RadialGradient id="cornerBurn" cx="-8%" cy="-5%" r="175%" fx="-8%" fy="-5%">
+          <Stop offset="0%" stopColor={PALETTE.accent} stopOpacity="0.98" />
+          <Stop offset="16%" stopColor={PALETTE.accent} stopOpacity="0.72" />
+          <Stop offset="31%" stopColor={PALETTE.accent} stopOpacity="0.42" />
+          <Stop offset="46%" stopColor={PALETTE.accent} stopOpacity="0.22" />
+          <Stop offset="62%" stopColor={PALETTE.accentHot} stopOpacity="0.10" />
+          <Stop offset="80%" stopColor={PALETTE.accentHot} stopOpacity="0.035" />
+          <Stop offset="100%" stopColor={PALETTE.ground} stopOpacity="0" />
         </RadialGradient>
 
         {/* A last ember at the far corner, so the diagonal has an end and not
@@ -4470,7 +4471,10 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   welcomeCopy: {
-    color: THEME.ink[50],
+    // INK[70], not [50]: this is the partner-advice paragraph, the one piece of
+    // running prose on the hub. At [50] it measured 4.1:1 on the card — under
+    // AA, and visibly murky on device.
+    color: THEME.ink[70],
     fontSize: 13,
     lineHeight: 18,
     fontFamily: FONTS.body,

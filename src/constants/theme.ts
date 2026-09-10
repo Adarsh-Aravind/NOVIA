@@ -132,7 +132,10 @@ export const THEME = {
     border: alpha(INK[95], 0.14),    // used sparingly; prefer shadow for depth
     text: INK[95],
     textMuted: alpha(INK[95], 0.62),
-    textFaint: alpha(INK[95], 0.38),
+    // 0.50, not 0.38. On the old slate ground 0.38 was borderline; against
+    // near-black it measured 3.3:1 on a glass card — under the 4.5:1 AA floor,
+    // and on the device the step-duel footnote was genuinely hard to read.
+    textFaint: alpha(INK[95], 0.50),
 
     primary: PALETTE.accent,     // main accent, CTAs, active states
     accent: PALETTE.accentWarm,  // secondary emphasis — softer, more amber
