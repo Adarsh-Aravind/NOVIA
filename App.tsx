@@ -2391,6 +2391,7 @@ export default function App() {
                 style={styles.copyableIdText}
                 value={session.user.id}
                 editable={false}
+                multiline
                 selectTextOnFocus={true}
               />
               <Text style={styles.copyInstructions}>
@@ -2487,7 +2488,7 @@ export default function App() {
                     {/* Companion Status Row */}
                     <FadeInUp index={0}>
                     <GlassCard style={styles.partnerCard}>
-                      <Text style={styles.sectionHeading}>COMPANION REAL-TIME TRACKING</Text>
+                      <Text style={styles.sectionHeading}>RIGHT NOW</Text>
                       <View style={styles.rowBetween}>
                         <Text style={styles.partnerName}>{partnerName}</Text>
                         <View style={[styles.moodBadge, { backgroundColor: (THEME.colors.mood as any)[partnerMood] || THEME.colors.mood.Neutral }]}>
@@ -4051,6 +4052,7 @@ export default function App() {
                         style={styles.copyableIdText}
                         value={session?.user?.id}
                         editable={false}
+                        multiline
                         selectTextOnFocus={true}
                       />
                       <Text style={styles.copyInstructions}>
@@ -5412,7 +5414,13 @@ const styles = StyleSheet.create({
   },
   copyableIdText: {
     color: THEME.ink[95],
-    fontSize: 12,
+    // 11, not 12, and multiline on the inputs themselves. A single-line
+    // TextInput SCROLLS its content rather than wrapping, so a UUID that
+    // doesn't fit is silently shown truncated with no indication — on a 360dp
+    // device the key rendered as `bc9374-65d2-...`, six characters into a group
+    // that has eight. Someone reading their key off this screen would copy a
+    // value that isn't theirs.
+    fontSize: 11,
     fontFamily: FONTS.bold,
     backgroundColor: THEME.glass.surfaceStrong,
     borderRadius: THEME.borderRadius.sm,
