@@ -200,9 +200,9 @@ export const THEME = {
   // surfaces should use — reach for a bare fill only when you need a tint on
   // something that isn't a pane of glass.
   glass: {
-    surface: alpha(INK[95], 0.075),   // resting frosted glass
-    surfaceStrong: alpha(INK[95], 0.115), // raised / interactive glass
-    inset: alpha(INK[0], 0.28),     // carved-in wells (inputs, nested rows)
+    surface: 'rgba(20, 18, 17, 0.66)',   // resting frosted glass (dark scrim)
+    surfaceStrong: 'rgba(30, 28, 26, 0.78)', // raised / interactive glass
+    inset: alpha(INK[0], 0.55),     // carved-in wells (inputs, nested rows)
     accent: alpha(PALETTE.accent, 0.16),  // active / selected tint
     accentStrong: alpha(PALETTE.accent, 0.24),
     moss: alpha(PALETTE.accent, 0.16),            // legacy alias for the accent tint
@@ -291,6 +291,15 @@ export const THEME = {
    * shadow falls. A thicker material is more opaque, more lit at the edge, and
    * further off the background — which is what the blur would have signalled.
    *
+   * These fills are dark SCRIMS, not light tints, and that distinction is
+   * load-bearing. An ink-tinted fill *lightens* whatever is behind it, so over
+   * the backdrop's orange corner burn a card simply became orange — measured at
+   * 1.92:1 for accent text on a card in the hot zone, which is exactly how it
+   * looked on device: unreadable. A dark scrim dims the backdrop instead
+   * (4.90:1 for the same pairing) while still lifting ~3x above the near-black
+   * ground, which is how a dark material is supposed to behave. The cost is a
+   * subtler card edge on plain black — that job now belongs to the rim.
+   *
    * Two rules from the material system that this encodes:
    *   - Weight is hierarchy. `chrome` is structural (nav, drawer, modals) and
    *     is *darker* than the content it floats over, so it separates regions
@@ -306,7 +315,7 @@ export const THEME = {
   material: {
     /** Faint grouping *inside* an already-glass card. */
     thin: {
-      backgroundColor: alpha(INK[95], 0.045),
+      backgroundColor: 'rgba(16, 15, 14, 0.50)',
       borderWidth: 1,
       borderColor: alpha(INK[95], 0.10),
       shadowColor: '#000000',
@@ -317,7 +326,7 @@ export const THEME = {
     },
     /** The standard content card. */
     regular: {
-      backgroundColor: alpha(INK[95], 0.075),
+      backgroundColor: 'rgba(20, 18, 17, 0.66)',
       borderWidth: 1,
       borderColor: alpha(INK[95], 0.13),
       shadowColor: '#000000',
@@ -328,7 +337,7 @@ export const THEME = {
     },
     /** Raised and interactive — sits closest to the viewer. */
     thick: {
-      backgroundColor: alpha(INK[95], 0.115),
+      backgroundColor: 'rgba(30, 28, 26, 0.78)',
       borderWidth: 1,
       borderColor: alpha(INK[95], 0.17),
       shadowColor: '#000000',
@@ -350,7 +359,7 @@ export const THEME = {
     },
     /** Carved into the surface above it: inputs, nested rows, nav tiles. */
     well: {
-      backgroundColor: alpha(INK[0], 0.28),
+      backgroundColor: alpha(INK[0], 0.55),
       borderWidth: 1,
       borderColor: alpha(INK[0], 0.34),
     },

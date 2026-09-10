@@ -2734,7 +2734,7 @@ export default function App() {
                             <Text
                               style={[
                                 styles.cyclePhasePillText,
-                                { color: PHASE_COLORS[predictions.currentPhase] },
+                                { color: THEME.ink[95] },
                               ]}
                             >
                               {predictions.currentPhase}
@@ -3604,7 +3604,7 @@ export default function App() {
                             <Text style={styles.sectionHeading}>MENSTRUAL CYCLE</Text>
                             {predictions && phaseData ? (
                               <View style={[styles.cyclePhasePill, { backgroundColor: phaseData.color + '26' }]}>
-                                <Text style={[styles.cyclePhasePillText, { color: phaseData.color }]}>{phaseData.phase}</Text>
+                                <Text style={[styles.cyclePhasePillText, { color: THEME.ink[95] }]}>{phaseData.phase}</Text>
                               </View>
                             ) : null}
                           </View>
@@ -4203,7 +4203,7 @@ export default function App() {
                         <View style={{ paddingBottom: 24 }}>
                           {/* Hero */}
                           <View style={[styles.cycleHero, { backgroundColor: phaseData.color + '22', borderColor: phaseData.color + '55' }]}>
-                            <Text style={[styles.cycleHeroPhase, { color: phaseData.color }]}>{phaseData.phase}</Text>
+                            <Text style={[styles.cycleHeroPhase, { color: THEME.ink[95] }]}>{phaseData.phase}</Text>
                             <Text style={styles.cycleHeroBadge}>{phaseData.badge}</Text>
                             {predictions && (
                               <Text style={styles.cycleHeroDay}>Cycle day {predictions.cycleDay} of ~{predictions.avgCycleLength}</Text>
