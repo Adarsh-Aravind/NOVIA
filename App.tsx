@@ -3,7 +3,6 @@ import {
   StyleSheet,
   Text,
   View,
-  Image,
   TextInput,
   TouchableOpacity,
   ScrollView,
@@ -24,7 +23,7 @@ import { Calendar } from 'react-native-calendars';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
 import { Menu, Settings as SettingsIcon, LogOut, X, Heart, Check, Square, CheckSquare, Home, FileText, Wallet, Activity, ListChecks, MessageSquareWarning, ChevronLeft, Send, BookOpen, Sparkles, ScrollText, CalendarHeart, Flame, Footprints, Trophy } from 'lucide-react-native';
-import Svg, { Defs, LinearGradient as SvgLinearGradient, RadialGradient, Rect, Stop } from 'react-native-svg';
+import Svg, { Defs, Image as SvgImage, LinearGradient as SvgLinearGradient, Pattern, RadialGradient, Rect, Stop } from 'react-native-svg';
 import * as Notifications from 'expo-notifications';
 import { TodoRecurrence, AppUpdate, Milestone, MilestoneRecurrence } from './src/types';
 import { useAuth } from './src/hooks/useAuth';
@@ -72,7 +71,7 @@ import { Manrope_600SemiBold } from '@expo-google-fonts/manrope/600SemiBold';
 import { Manrope_700Bold } from '@expo-google-fonts/manrope/700Bold';
 import { Manrope_800ExtraBold } from '@expo-google-fonts/manrope/800ExtraBold';
 import { alpha, FONTS, PALETTE, THEME } from './src/constants/theme';
-import { GRAIN_URI } from './src/constants/grain';
+import { GRAIN_OPACITY, GRAIN_TILE, GRAIN_URI } from './src/constants/grain';
 import { SPRING, projectMomentum } from './src/constants/motion';
 import { useReducedMotion } from './src/hooks/useReducedMotion';
 
@@ -117,7 +116,6 @@ const PHASE_COLORS = THEME.colors.phase;
  */
 function SpaceBackdrop() {
   return (
-    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
     <Svg pointerEvents="none" style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox="0 0 390 844" preserveAspectRatio="xMidYMid slice">
       <Defs>
         {/* Key light: neon orange spilling in from beyond the top-left corner */}
@@ -148,6 +146,32 @@ function SpaceBackdrop() {
           <Stop offset="80%" stopColor={PALETTE.ground} stopOpacity="0" />
         </SvgLinearGradient>
 
+        {/* Grain, tiled as an SVG pattern.
+            GRAIN_TILE is in viewBox user units, NOT pixels, and that is the
+            whole point. React Native's <Image resizeMode="repeat"> tiles at the
+            texture's *dp* size, so a 64px texture becomes a 64dp tile and every
+            noise texel is smeared across dpr^2 physical pixels — 3x3 blocks on
+            these screens, which reads as blocky static with visible tiling
+            structure rather than as grain. A pattern lets the tile size be set
+            independently of the source resolution, so one texel can land on
+            roughly one physical pixel. */}
+        <Pattern
+          id="grainPattern"
+          x="0"
+          y="0"
+          width={GRAIN_TILE}
+          height={GRAIN_TILE}
+          patternUnits="userSpaceOnUse"
+        >
+          <SvgImage
+            href={{ uri: GRAIN_URI }}
+            x="0"
+            y="0"
+            width={GRAIN_TILE}
+            height={GRAIN_TILE}
+            preserveAspectRatio="none"
+          />
+        </Pattern>
       </Defs>
 
       {/* Black base layer */}
@@ -160,17 +184,11 @@ function SpaceBackdrop() {
       {/* Bottom atmospheric fade covering the area below the pill taskbar */}
       <Rect width="390" height="844" fill="url(#bottomFade)" />
 
+      {/* Grain last, over the whole composition. It is not decoration: a
+          near-black ground shows heavy gradient banding on OLED, and this is
+          what dithers it out. */}
+      <Rect width="390" height="844" fill="url(#grainPattern)" opacity={GRAIN_OPACITY} />
     </Svg>
-
-      {/* Grain, tiled as a real texture rather than an SVG filter — see
-          [[GRAIN_URI]] for why the filter approach silently rendered nothing.
-          It dithers the gradient banding that near-black shows on OLED. */}
-      <Image
-        source={{ uri: GRAIN_URI }}
-        resizeMode="repeat"
-        style={[StyleSheet.absoluteFill, { opacity: 0.16 }]}
-      />
-    </View>
   );
 }
 
