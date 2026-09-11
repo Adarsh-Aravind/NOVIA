@@ -10,7 +10,7 @@ import { StepCount, StepForfeit } from '../types';
  * Own steps come from Health Connect on this device; they're upserted to
  * Supabase (public.step_counts, one row per user per day) so the partner can
  * read them. The partner's number comes back the same way, kept live via a
- * realtime subscription (mirrors [[useCheckIns]]).
+ * realtime subscription.
  *
  * On top of the daily duel this derives a season from the quarter's history:
  * a daily-win tally, the current win streak, and the champion. The "stakes"

@@ -20,13 +20,13 @@ NOVIA (Noviris) is a React Native application built for two people — a shared 
 
 - **Step Duel** — a daily step competition sourced from Health Connect, with a seven-day comparison graph, a quarterly season tally, win streaks, and a shared forfeit the season's loser owes.
 - **Relationship Milestones** — anniversaries and one-off dates, with day-of and day-before local notifications on both devices.
-- **Daily Check-ins** — a shared mood and gratitude log with streaks visible to both partners.
+- **Right Now** — each partner's current mood, visible to the other the moment it changes, with phase-aware advice on what to do about it.
 - **Complaint Threads** — a structured, realtime channel for working through disagreements.
 - **Shared Notes** — a realtime note grid with emoji reactions and a live typing indicator.
 - **Shared Tasks** — a synchronised todo list with recurrence and reminders on both phones.
 - **Detected Payments** — money moving between the two of them, read off the bank's own SMS and logged without anyone entering anything. Android only.
 - **Cycle Tracking** — predictive period and ovulation modelling with phase-aware guidance.
-- **Ideas & Chat** — a Groq-backed assistant. A free-form chat tab, plus an idea generator reachable from the notes composer whose suggestions save straight to a shared note. It sends only what you type: no moods, check-ins, cycle data or step history ever leave the device through it.
+- **Ideas & Chat** — a Groq-backed assistant. A free-form chat tab, plus an idea generator reachable from the notes composer whose suggestions save straight to a shared note. It sends only what you type: no moods, cycle data or step history ever leave the device through it.
 - **Vocabulary Builder** — a word a day, delivered by notification.
 
 ## Design System
@@ -111,6 +111,28 @@ the spellings their bank actually uses. The generosity runs one way only:
 missing a payment is recoverable, putting a stranger's transfer into a couple's
 shared feed is not.
 
+## Profile Pictures
+
+The picture is stored **in the database, not in a bucket**:
+`profiles.avatar_url` holds a `data:image/jpeg;base64,...` string.
+
+That is a deliberate trade, not a shortcut. A Supabase Storage bucket would mean
+creating the bucket, writing `storage.objects` policies, building an upload path
+(React Native has no working `Blob` route, so it needs an `ArrayBuffer` and a
+base64 decoder this project doesn't carry), and then choosing between a public
+bucket whose URLs are guessable and signed URLs with an expiry to refresh. The
+column, by contrast, already exists, is already couple-scoped by the profiles
+RLS policy, and is already pushed to the device by the `profile-self` realtime
+channel. `<Image>` takes a `data:` URI without caring.
+
+The whole trade rests on the image being small, so
+[`profilePhoto.ts`](src/services/profilePhoto.ts) crops to a square in the
+system picker, resizes to **256px** and saves at **JPEG quality 0.6** — about
+20KB — and refuses anything that still encodes over 300KB. That cap is not
+expected to fire; it is there because the failure it guards against is silent. A
+multi-megabyte row would not announce itself, it would just make every profile
+fetch and every realtime payload slower, permanently.
+
 ## Project Structure
 
 ```text
@@ -121,10 +143,10 @@ supabase/migrations/  # incremental migrations to run against an existing projec
 plugins/              # local Expo config plugins (Health Connect permission delegate)
 modules/              # local native modules (Android notification + SMS listener)
 src/
-├── components/common/  # Skeleton, HubSkeleton, GlassCard, StepGraph
+├── components/common/  # Skeleton, HubSkeleton, GlassCard, StepGraph, Avatar
 ├── constants/          # theme (colour, material, type), motion, vocabulary
 ├── hooks/              # Supabase data + auth hooks, one per feature
-├── services/           # notifications, OTA updates, encrypted session storage
+├── services/           # notifications, OTA updates, encrypted session storage, photo pipeline
 ├── types/              # database row shapes
 └── utils/              # pure helpers — cycle and milestone maths, payment parsing
 ```
@@ -154,6 +176,14 @@ Use the **publishable** (or legacy `anon`) key — never the `service_role` key,
 Run [`schema.sql`](schema.sql) against a fresh project, or apply the files in `supabase/migrations/` to an existing one.
 
 **Don't skip the realtime publication.** Every `postgres_changes` subscription requires its table to be a member of `supabase_realtime`. Without membership the client subscribes *successfully* and then receives nothing — a dead feed that is indistinguishable from a working one. `schema.sql` publishes every subscribed table; `supabase/migrations/20260910_step_realtime.sql` repairs an existing project.
+
+**Two tables outlive their features.** `finances` and `check_ins` are no longer
+read or written by any code — the hand-entered ledger became detected payments,
+and the daily check-in was dropped because "Right Now" already answered the same
+question in one tap. Both tables, their policies and their migrations are left
+in place on purpose: they hold real records, and dropping them is a data
+decision for the owner rather than a code cleanup. A fresh project created from
+`schema.sql` still gets them.
 
 `supabase/migrations/20260911_transactions.sql` adds the detected-payments table
 and its `record_transaction()` write path. It is idempotent, so it is safe to

@@ -71,17 +71,6 @@ export interface Milestone {
   created_at: string;
 }
 
-export interface CheckIn {
-  id: string;
-  couple_id: string;
-  user_id: string;
-  check_in_date: string; // 'YYYY-MM-DD'
-  feeling: string;       // emoji glyph
-  gratitude: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface StepCount {
   id: string;
   couple_id: string;

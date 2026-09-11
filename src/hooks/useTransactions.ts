@@ -28,6 +28,18 @@ const FEED_LIMIT = 100;
 const SEEN_KEY = 'novia.payments.seen';
 const SEEN_MAX = 300;
 
+/**
+ * Captures whose upload failed, held until it can be retried.
+ *
+ * Draining the native queue is destructive — the entries are gone from the
+ * device the moment they are read. So a failed post (offline, server down, a
+ * session that needs refreshing) has nowhere to fall back to unless it is
+ * written down here. Without this the payment is lost permanently, which is
+ * precisely the failure this feature exists to prevent.
+ */
+const RETRY_KEY = 'novia.payments.retry';
+const RETRY_MAX = 50;
+
 function rawKey(n: CapturedNotification): string {
   return `${n.packageName}|${n.postTime}|${n.title}|${n.text}`;
 }
@@ -62,6 +74,8 @@ export interface TransactionsState {
   refresh: () => Promise<void>;
   /** Re-reads the OS permission state, e.g. on return from Settings. */
   recheckPermission: () => void;
+  /** False until the first permission read lands — render nothing until then. */
+  permissionsChecked: boolean;
 }
 
 /**
@@ -79,6 +93,10 @@ export function useTransactions(
   const [permitted, setPermitted] = useState(false);
   const [batteryExempt, setBatteryExempt] = useState(true);
   const [smsGranted, setSmsGranted] = useState(false);
+  // The SMS check is async, so on the first render nothing is known yet. Until
+  // it resolves the screen must not claim the permission is missing, or every
+  // launch flashes the onboarding card at someone who set this up weeks ago.
+  const [permissionsChecked, setPermissionsChecked] = useState(false);
   const channelRef = useRef<any>(null);
 
   // Read once: the aliases and ids change, but the native module either exists
@@ -93,6 +111,7 @@ export function useTransactions(
   const coupleRef = useRef(coupleId);
   coupleRef.current = coupleId;
   const ingesting = useRef(false);
+  const ingestQueued = useRef(false);
 
   const fetchTransactions = useCallback(async () => {
     if (!coupleId) {
@@ -127,27 +146,44 @@ export function useTransactions(
    * loser would come back empty while the winner posts twice.
    */
   const ingest = useCallback(async () => {
-    if (!supported || ingesting.current) return;
-    if (!coupleRef.current) return;
+    if (!supported || !coupleRef.current) return;
+
+    // Re-entrant call: remember that there is more to do rather than dropping
+    // it. A notification that arrives mid-ingest was appended to the native
+    // queue before its event fired, so it is sitting there waiting — and
+    // without this flag it would wait until the app was next foregrounded.
+    if (ingesting.current) {
+      ingestQueued.current = true;
+      return;
+    }
 
     ingesting.current = true;
     try {
-      const pending = drainPending();
+      const retryRaw = await AsyncStorage.getItem(RETRY_KEY);
+      const retries: CapturedNotification[] = retryRaw ? JSON.parse(retryRaw) : [];
+      // Retries first: they are older, and the feed reads better in order.
+      const pending = [...retries, ...drainPending()];
       if (pending.length === 0) return;
 
       const seenRaw = await AsyncStorage.getItem(SEEN_KEY);
       const seen: string[] = seenRaw ? JSON.parse(seenRaw) : [];
       const seenSet = new Set(seen);
 
+      const failed: CapturedNotification[] = [];
       let posted = 0;
+
       for (const notification of pending) {
         const key = rawKey(notification);
         if (seenSet.has(key)) continue;
-        seenSet.add(key);
-        seen.push(key);
 
         const payment = parsePayment(notification, aliasRef.current);
-        if (!payment) continue;
+        if (!payment) {
+          // Not a payment between them. Nothing to upload, but remember it so
+          // the same message is not re-parsed on every future drain.
+          seenSet.add(key);
+          seen.push(key);
+          continue;
+        }
 
         const { error } = await supabase.rpc('record_transaction', {
           p_direction: payment.direction,
@@ -160,16 +196,23 @@ export function useTransactions(
 
         if (error) {
           console.error('[Payments] Record failed:', error.message);
-          // Forget it locally so the next drain can retry — a dropped payment
-          // is worse than a duplicate attempt, which the server collapses.
-          seenSet.delete(key);
-          seen.pop();
+          // Hold the capture itself, not just the fact that it failed — the
+          // native queue has already let go of it.
+          failed.push(notification);
           continue;
         }
+
+        seenSet.add(key);
+        seen.push(key);
         posted += 1;
       }
 
-      await AsyncStorage.setItem(SEEN_KEY, JSON.stringify(seen.slice(-SEEN_MAX)));
+      await AsyncStorage.multiSet([
+        [SEEN_KEY, JSON.stringify(seen.slice(-SEEN_MAX))],
+        // Newest kept when the cap bites: an old failure is likely a message
+        // whose wording we cannot parse anyway.
+        [RETRY_KEY, JSON.stringify(failed.slice(-RETRY_MAX))],
+      ]);
 
       // Realtime will deliver the row too, but only for rows this couple's
       // server actually inserted; refreshing here also covers the case where a
@@ -179,18 +222,28 @@ export function useTransactions(
       console.error('[Payments] Ingest failed:', e?.message ?? e);
     } finally {
       ingesting.current = false;
+      if (ingestQueued.current) {
+        ingestQueued.current = false;
+        ingest();
+      }
     }
   }, [supported, fetchTransactions]);
 
   const recheckPermission = useCallback(() => {
-    if (!supported) return;
+    if (!supported) {
+      setPermissionsChecked(true);
+      return;
+    }
     setPermitted(isPermissionGranted());
     setBatteryExempt(isIgnoringBatteryOptimizations());
-    if (Platform.OS === 'android') {
-      PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECEIVE_SMS)
-        .then(setSmsGranted)
-        .catch(() => setSmsGranted(false));
+    if (Platform.OS !== 'android') {
+      setPermissionsChecked(true);
+      return;
     }
+    PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECEIVE_SMS)
+      .then(setSmsGranted)
+      .catch(() => setSmsGranted(false))
+      .finally(() => setPermissionsChecked(true));
   }, [supported]);
 
   /**
@@ -298,6 +351,7 @@ export function useTransactions(
     batteryExempt,
     smsGranted,
     requestSms,
+    permissionsChecked,
     refresh: fetchTransactions,
     recheckPermission,
   };

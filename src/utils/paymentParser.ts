@@ -46,6 +46,18 @@ const CURRENCY = String.raw`(?:₹|rs\.?|inr)?\s*`;
 const AMOUNT = String.raw`([\d,]+(?:\.\d{1,2})?)`;
 const GAP = String.raw`(?:[^.]{0,60}?)?\s+`;
 
+/**
+ * A guard for the patterns that begin with a bare amount.
+ *
+ * The currency prefix is optional, so without this an account number reads as
+ * a figure: "A/c XX2946 paid to GAYATHRI UDAYAN" would log a ₹2,946 payment
+ * that never happened. A fabricated row is far worse than a miss — a miss gets
+ * noticed, an invented payment gets believed. Requiring a non-alphanumeric
+ * character before the digits rules that out while still accepting "Rs.20.00",
+ * "₹500" and a plain " 500".
+ */
+const START = String.raw`(?:^|[^A-Za-z0-9])`;
+
 interface Pattern {
   re: RegExp;
   direction: 'sent' | 'received';
@@ -64,7 +76,7 @@ const PATTERNS: Pattern[] = [
   },
   // "Rs.500.00 debited from A/c XX2946 to ADARSH ARAVIND"
   {
-    re: new RegExp(String.raw`${CURRENCY}${AMOUNT}\s+debited\b${GAP}to\s+(.+)`, 'i'),
+    re: new RegExp(String.raw`${START}${CURRENCY}${AMOUNT}\s+debited\b${GAP}to\s+(.+)`, 'i'),
     direction: 'sent',
     amountAt: 1,
     nameAt: 2,
@@ -78,7 +90,7 @@ const PATTERNS: Pattern[] = [
   },
   // "₹500 sent to Gayathri Udhayan"  ·  "₹500 paid to Gayathri"
   {
-    re: new RegExp(String.raw`${CURRENCY}${AMOUNT}\s+(?:sent|paid)\s+to\s+(.+)`, 'i'),
+    re: new RegExp(String.raw`${START}${CURRENCY}${AMOUNT}\s+(?:sent|paid)\s+to\s+(.+)`, 'i'),
     direction: 'sent',
     amountAt: 1,
     nameAt: 2,
@@ -102,14 +114,14 @@ const PATTERNS: Pattern[] = [
   },
   // "Rs.500.00 credited to your A/c XX2946 from ADARSH ARAVIND"
   {
-    re: new RegExp(String.raw`${CURRENCY}${AMOUNT}\s+credited\b${GAP}from\s+(.+)`, 'i'),
+    re: new RegExp(String.raw`${START}${CURRENCY}${AMOUNT}\s+credited\b${GAP}from\s+(.+)`, 'i'),
     direction: 'received',
     amountAt: 1,
     nameAt: 2,
   },
   // "₹500 received from Adarsh"
   {
-    re: new RegExp(String.raw`${CURRENCY}${AMOUNT}\s+received\s+from\s+(.+)`, 'i'),
+    re: new RegExp(String.raw`${START}${CURRENCY}${AMOUNT}\s+received\s+from\s+(.+)`, 'i'),
     direction: 'received',
     amountAt: 1,
     nameAt: 2,
@@ -232,7 +244,12 @@ export function parsePayment(
   if (__DEV__) {
     // The capture path: a watched app said something we don't understand, and
     // this is the only place the new wording can be read off a real device.
-    console.log('[payments] unmatched:', notification.packageName, JSON.stringify(haystack));
+    // Long digit runs are one-time codes, UPI references and account numbers.
+    // A new pattern needs the wording, not those, and this log goes to logcat
+    // where anyone watching a debug session can read it. Amounts are short
+    // enough to survive the mask.
+    const masked = haystack.replace(/\d{5,}/g, '#####');
+    console.log('[payments] unmatched:', notification.packageName, JSON.stringify(masked));
   }
   return null;
 }

@@ -18,6 +18,7 @@ import {
   AppState,
   Dimensions,
   BackHandler,
+  Linking,
   PanResponder
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -35,10 +36,10 @@ import { useTodos } from './src/hooks/useTodos';
 import { usePeriods } from './src/hooks/usePeriods';
 import { useComplaints } from './src/hooks/useComplaints';
 import { useMilestones } from './src/hooks/useMilestones';
-import { useCheckIns } from './src/hooks/useCheckIns';
 import { useSteps } from './src/hooks/useSteps';
 import { Skeleton } from './src/components/common/Skeleton';
 import { HubSkeleton } from './src/components/common/HubSkeleton';
+import { Avatar } from './src/components/common/Avatar';
 import { GlassBacking, GlassCard } from './src/components/common/GlassCard';
 import { StepGraph } from './src/components/common/StepGraph';
 import { configureNotificationsAsync, PRIORITY_CHANNEL } from './src/services/notification';
@@ -49,6 +50,7 @@ import { claimNotification, getOrCreateBaseline, pruneNotifiedMarkers } from './
 import { withLock } from './src/utils/asyncLock';
 import { parseLocalDate } from './src/utils/dateUtils';
 import { directionFor, useTransactions } from './src/hooks/useTransactions';
+import { pickProfilePhoto } from './src/services/profilePhoto';
 import { openSettings as openListenerSettings, requestIgnoreBatteryOptimizations } from './modules/notification-listener';
 import {
   daysUntilNext,
@@ -74,15 +76,6 @@ import { useReducedMotion } from './src/hooks/useReducedMotion';
 
 // Quick emoji reactions available on each shared note.
 const NOTE_REACTIONS = ['❤️', '😂', '👍', '🥺', '🔥'] as const;
-
-// Daily check-in feelings, ordered brightest → lowest.
-const CHECK_IN_FEELINGS: { emoji: string; label: string }[] = [
-  { emoji: '😄', label: 'Great' },
-  { emoji: '🙂', label: 'Good' },
-  { emoji: '😐', label: 'Okay' },
-  { emoji: '😔', label: 'Low' },
-  { emoji: '😢', label: 'Rough' },
-];
 
 /**
  * Idea starters. A blank prompt box is the hardest question in the app, so
@@ -135,6 +128,19 @@ function formatAmount(value: number): string {
   return fraction ? `${grouped}.${fraction}` : grouped;
 }
 
+/**
+ * The hub greeting. Morning until noon, afternoon until five, evening after —
+ * and the small hours get "evening" too rather than a "good night" that reads
+ * like a farewell to someone who just opened the app.
+ */
+function greetingForHour(hour: number): string {
+  if (hour >= 5 && hour < 12) return 'Good Morning';
+  // Both bounds, not just the upper one: `hour < 17` alone sweeps up 1am as
+  // afternoon, because the morning test above has already failed by then.
+  if (hour >= 12 && hour < 17) return 'Good Afternoon';
+  return 'Good Evening';
+}
+
 /** 'Today' / 'Yesterday' / '8 Sep' — the heading a run of payments sits under. */
 function formatDayLabel(iso: string): string {
   const date = new Date(iso);
@@ -149,7 +155,6 @@ function formatDayLabel(iso: string): string {
 function formatClock(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
-
 
 /**
  * The ground: one neon-orange source burning in the top-left corner, falling
@@ -705,13 +710,25 @@ const TAB_ICONS: Record<string, React.ComponentType<{ size?: number; color?: str
   menu: Menu,
 };
 
-
 // Hub sub-screens reachable from Hub cards (not on the tab bar). The device
 // back button and their on-screen back rows both return from these to the Hub.
 const HUB_SUBSCREENS = ['todos', 'milestones', 'complaints', 'bucket', 'health'];
 
-/** Side drawer width. Shared by the panel style and the drag maths. */
-const DRAWER_WIDTH = 280;
+/**
+ * The menu is full-screen, so the panel's width is the window's.
+ *
+ * Shared by the panel style, the slide transform and the drag maths, which is
+ * why this one line is most of what "make it full screen" means. The gesture
+ * needs no re-tuning: it works in progress units, so a wider panel is simply a
+ * longer drag for the same fraction.
+ *
+ * Read once at module load, like ANDROID_NAV_INSET above — the app is
+ * portrait-locked, so there is no rotation for this to go stale against.
+ */
+const DRAWER_WIDTH = Dimensions.get('window').width;
+
+/** The credit line in the menu footer links here. */
+const DEVELOPER_URL = 'https://www.adarsharavind.com';
 
 function AnimatedTabBar<T extends string>({
   tabs,
@@ -895,6 +912,7 @@ export default function App() {
     signOut,
     pairPartner,
     updateDisplayName,
+    updateAvatar,
     unpairPartner
   } = useAuth();
   const userId = session?.user?.id || null;
@@ -946,13 +964,6 @@ export default function App() {
     repliesFor,
   } = useComplaints(coupleId, userId);
   const { milestones, addMilestone, deleteMilestone } = useMilestones(coupleId, userId);
-  const {
-    myToday: myCheckIn,
-    partnerToday: partnerCheckIn,
-    myStreak,
-    partnerStreak,
-    submitCheckIn,
-  } = useCheckIns(coupleId, userId, partnerProfile?.id);
   const {
     mySteps,
     partnerSteps,
@@ -1024,6 +1035,7 @@ export default function App() {
     batteryExempt: paymentsBatteryExempt,
     smsGranted: paymentsSmsGranted,
     requestSms: requestPaymentsSms,
+    permissionsChecked: paymentsChecked,
     recheckPermission: recheckPaymentsPermission,
   } = useTransactions(coupleId, paymentAliases);
 
@@ -1242,6 +1254,12 @@ export default function App() {
     })
   ).current;
 
+  const openDeveloperLink = () => {
+    // Rejects when nothing on the device can take the intent. A credit line
+    // that quietly does nothing beats an alert about a byline.
+    Linking.openURL(DEVELOPER_URL).catch(() => {});
+  };
+
   const handleSaveDisplayName = async () => {
     if (!tempDisplayName.trim()) {
       Alert.alert("Name required", "Please enter a valid display name.");
@@ -1299,8 +1317,7 @@ export default function App() {
       else if (data.kind === 'complaint') setActiveTab('complaints');
       else if (data.kind === 'cycle') { setActiveTab('health'); setIsCycleModalVisible(true); }
       else if (data.kind === 'milestone') setActiveTab('milestones');
-      else if (data.kind === 'checkin') setActiveTab('hub');
-      else if (data.kind === 'update') { setIsChangelogVisible(true); markUpdatesViewed(); }
+        else if (data.kind === 'update') { setIsChangelogVisible(true); markUpdatesViewed(); }
     };
     const responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
       routeFromData(response.notification.request.content.data);
@@ -1359,9 +1376,6 @@ export default function App() {
   const [milestoneEmoji, setMilestoneEmoji] = useState<string>('💛');
 
   // Daily check-in inputs (Hub card). Pre-filled from any existing entry today.
-  const [checkInFeeling, setCheckInFeeling] = useState<string>('');
-  const [checkInGratitude, setCheckInGratitude] = useState<string>('');
-
   // Complaint Box inputs
   const [newComplaintTitle, setNewComplaintTitle] = useState('');
   const [newComplaintBody, setNewComplaintBody] = useState('');
@@ -1453,7 +1467,6 @@ export default function App() {
     if (creatorId === partnerProfile?.id) return partnerProfile.display_name || partnerName || 'Partner';
     return 'Partner';
   };
-
 
   const fetchSharedBucketList = async () => {
     if (!coupleId) return;
@@ -1665,35 +1678,6 @@ export default function App() {
     scheduleMilestoneReminders();
   }, [milestones, coupleId]);
 
-  // Daily check-in nudge at 8pm. Schedules the next week of one-shots (rolling
-  // forward on foreground), and skips today's once this device has already
-  // checked in — so the prompt stops nagging the moment you respond.
-  useEffect(() => {
-    if (!session || !coupleId) return;
-    const scheduleCheckInReminders = () => withLock(`checkin:${coupleId}`, async () => {
-      await cancelScheduledNotificationsByPrefix('checkin:');
-      const AT_HOUR = 20;
-      const now = new Date();
-      const jobs: Promise<any>[] = [];
-      for (let i = 0; i < 7; i++) {
-        const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i, AT_HOUR, 0, 0, 0);
-        if (day.getTime() <= Date.now()) continue;
-        if (i === 0 && myCheckIn) continue; // already checked in today
-        jobs.push(
-          scheduleLocalNotification({
-            title: 'Daily check-in',
-            body: 'How are you feeling today? Share a moment of gratitude with your partner.',
-            trigger: day as any,
-            channelId: PRIORITY_CHANNEL,
-            data: { kind: 'checkin', reminderKey: `checkin:${day.toDateString()}` },
-          })
-        );
-      }
-      await Promise.all(jobs);
-    });
-    scheduleCheckInReminders();
-  }, [session, coupleId, foregroundTick, myCheckIn]);
-
   // Daily vocabulary: schedule the next 14 days of one-shot notifications, each
   // carrying that day's specific word. Rolls forward on foreground (foregroundTick).
   useEffect(() => {
@@ -1820,13 +1804,11 @@ export default function App() {
     if (!success) setNewNoteContent(content);
   };
 
-
   /**
    * Settle an item. A recurring subscription rolls forward to its next billing
    * date instead of being retired — marking Netflix "paid" used to remove it
    * from the ledger permanently, so it silently stopped being tracked.
    */
-
 
   /**
    * Clear outstanding borrowings in one direction.
@@ -2033,29 +2015,6 @@ export default function App() {
     setMilestoneEmoji('💛');
   };
 
-  // ---- Daily check-in handlers ---------------------------------------------
-  // Keep the card's controls in sync with today's saved entry (either partner's
-  // realtime update, or this device re-submitting).
-  useEffect(() => {
-    if (myCheckIn) {
-      setCheckInFeeling(myCheckIn.feeling);
-      setCheckInGratitude(myCheckIn.gratitude || '');
-    }
-  }, [myCheckIn?.feeling, myCheckIn?.gratitude]);
-
-  const handleSubmitCheckIn = async (feeling?: string) => {
-    const chosen = feeling || checkInFeeling;
-    if (!chosen) {
-      Alert.alert('Pick a feeling', 'Tap how you feel today first.');
-      return;
-    }
-    setCheckInFeeling(chosen);
-    const saved = await submitCheckIn(chosen, checkInGratitude);
-    if (!saved) {
-      Alert.alert('Not saved', 'NOVIA could not save your check-in. Please check connectivity.');
-    }
-  };
-
   // ---- Complaint handlers --------------------------------------------------
   const handleAddComplaint = async () => {
     if (!newComplaintTitle.trim()) {
@@ -2123,6 +2082,46 @@ export default function App() {
   }, [complaints, complaintsLoading, userId, coupleId, partnerProfile, partnerName]);
 
   const welcomeName = profile?.display_name || session?.user?.email?.split('@')[0] || 'there';
+
+  /*
+   * Keyed on foregroundTick — the counter that already increments whenever the
+   * app comes to the foreground. Right granularity: nobody holds the hub open
+   * across noon and minds that it still says morning, but everybody opens the
+   * app in the morning and again at night, and both should be greeted properly.
+   */
+  const greeting = useMemo(
+    () => greetingForHour(new Date().getHours()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [foregroundTick]
+  );
+
+  const [avatarBusy, setAvatarBusy] = useState(false);
+
+  const changeProfilePhoto = async () => {
+    if (avatarBusy) return;
+    setAvatarBusy(true);
+    try {
+      const result = await pickProfilePhoto();
+      if (result.cancelled) return;
+      if (result.error) {
+        Alert.alert('Could not use that photo', result.error);
+        return;
+      }
+      await updateAvatar(result.dataUri!);
+    } catch (e: any) {
+      Alert.alert('Could not save', e?.message ?? 'Please try again.');
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
+  const removeProfilePhoto = async () => {
+    try {
+      await updateAvatar(null);
+    } catch (e: any) {
+      Alert.alert('Could not remove', e?.message ?? 'Please try again.');
+    }
+  };
   const relationshipAdvice = (() => {
     const partnerNameVal = partnerProfile?.display_name || partnerName || 'your partner';
     switch (partnerMood) {
@@ -2486,8 +2485,21 @@ export default function App() {
                         },
                       ]}
                     >
-                      <Text style={styles.welcomeTitle}>Hi {welcomeName}</Text>
-                      <Text style={styles.welcomeSubtitle}>Welcome back</Text>
+                      {/* The picture is the control: tapping it opens the
+                          picker. Settings carries the discoverable version of
+                          the same action, and the only way to remove one. */}
+                      <TouchableOpacity
+                        onPress={changeProfilePhoto}
+                        activeOpacity={0.8}
+                        disabled={avatarBusy}
+                        accessibilityLabel="Change profile picture"
+                      >
+                        <Avatar uri={profile?.avatar_url} name={welcomeName} size={56} />
+                      </TouchableOpacity>
+                      <View style={styles.welcomeText}>
+                        <Text style={styles.welcomeTitle}>{greeting}</Text>
+                        <Text style={styles.welcomeSubtitle} numberOfLines={1}>{welcomeName}</Text>
+                      </View>
                     </Animated.View>
 
                     {/* Companion Status Row */}
@@ -2700,64 +2712,6 @@ export default function App() {
                       </FadeInUp>
                     )}
 
-                    {/* Daily check-in / gratitude with partner-visible streaks. */}
-                    <FadeInUp index={2}>
-                    <GlassCard style={styles.sectionCard} blur={false}>
-                      <View style={styles.rowBetween}>
-                        <Text style={styles.sectionHeading}>DAILY CHECK-IN</Text>
-                        <View style={styles.streakPill}>
-                          <Flame size={13} color={THEME.colors.warning} />
-                          <Text style={styles.streakPillText}>{myStreak}d</Text>
-                        </View>
-                      </View>
-                      <Text style={styles.checkInPrompt}>How are you feeling today?</Text>
-                      <View style={styles.checkInEmojiRow}>
-                        {CHECK_IN_FEELINGS.map((f) => {
-                          const selected = checkInFeeling === f.emoji;
-                          return (
-                            <TouchableOpacity
-                              key={f.emoji}
-                              style={[styles.checkInEmojiBtn, selected && styles.checkInEmojiBtnActive]}
-                              onPress={() => handleSubmitCheckIn(f.emoji)}
-                              activeOpacity={0.8}
-                            >
-                              <Text style={styles.checkInEmoji}>{f.emoji}</Text>
-                              <Text style={[styles.checkInEmojiLabel, selected && { color: THEME.colors.primary }]}>{f.label}</Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </View>
-
-                      <TextInput
-                        style={[styles.input, { marginTop: 12 }]}
-                        placeholder="One thing you're grateful for (optional)"
-                        placeholderTextColor={THEME.ink[35]}
-                        value={checkInGratitude}
-                        onChangeText={setCheckInGratitude}
-                      />
-                      <SubmitButton style={[styles.primaryButton, { marginTop: 12 }]} onPress={() => handleSubmitCheckIn()}>
-                        <Text style={styles.primaryBtnText}>{myCheckIn ? 'UPDATE CHECK-IN' : 'SAVE CHECK-IN'}</Text>
-                      </SubmitButton>
-
-                      <View style={styles.checkInPartnerRow}>
-                        <View style={{ flex: 1, paddingRight: 8 }}>
-                          <Text style={styles.checkInPartnerLabel}>{partnerName || 'Partner'}</Text>
-                          {partnerCheckIn ? (
-                            <Text style={styles.checkInPartnerValue}>
-                              {partnerCheckIn.feeling}{partnerCheckIn.gratitude ? ` · grateful for ${partnerCheckIn.gratitude}` : ' · checked in today'}
-                            </Text>
-                          ) : (
-                            <Text style={styles.checkInPartnerMuted}>Hasn't checked in yet today</Text>
-                          )}
-                        </View>
-                        <View style={styles.streakPill}>
-                          <Flame size={13} color={THEME.colors.warning} />
-                          <Text style={styles.streakPillText}>{partnerStreak}d</Text>
-                        </View>
-                      </View>
-                    </GlassCard>
-                    </FadeInUp>
-
                     {/* Compact cycle snapshot — tap through to the full tracker. */}
                     {predictions && (
                       <FadeInUp index={1}>
@@ -2916,8 +2870,10 @@ export default function App() {
                         times a day, on a screen whose job is reading what is
                         already there. The composer moved into a sheet behind
                         this plus. */}
-                    <View style={styles.notesHeader}>
-                      <Text style={styles.sectionHeading}>SHARED NOTES</Text>
+                    <View style={styles.tabHeader}>
+                      <View style={styles.tabHeaderChip}>
+                        <Text style={styles.tabHeaderText}>SHARED NOTES</Text>
+                      </View>
                       <PressableScale
                         style={styles.notesAddButton}
                         scaleTo={0.88}
@@ -2974,8 +2930,10 @@ export default function App() {
                     only reports what already happened. */}
                 {activeTab === 'finances' && (
                   <View style={styles.tabContent}>
-                    <View style={styles.notesHeader}>
-                      <Text style={styles.sectionHeading}>MONEY</Text>
+                    <View style={styles.tabHeader}>
+                      <View style={styles.tabHeaderChip}>
+                        <Text style={styles.tabHeaderText}>MONEY</Text>
+                      </View>
                       {paymentsSupported && paymentsListening ? (
                         <PressableScale
                           style={styles.aliasButton}
@@ -2995,11 +2953,19 @@ export default function App() {
                       <GlassCard style={styles.sectionCard} blur={false}>
                         <Text style={styles.paymentTitle}>Not available here</Text>
                         <Text style={styles.paymentCopy}>
-                          Payment detection reads Android notifications, and iOS has no
-                          equivalent to read. On Android it needs a build that carries the
-                          listener — if this phone updated over the air, install the
-                          latest APK and it will appear.
+                          Payment detection reads this phone's texts and notifications,
+                          and iOS lets an app do neither. On Android it needs a build that
+                          carries the listener — if this phone last updated over the air,
+                          install the newest APK and it will appear.
                         </Text>
+                      </GlassCard>
+                    ) : !paymentsChecked ? (
+                      /* The SMS permission read is async. Showing the
+                         onboarding card before it lands would flash "turn this
+                         on" at someone who turned it on weeks ago. */
+                      <GlassCard style={styles.sectionCard} blur={false}>
+                        <Skeleton height={14} />
+                        <Skeleton width="62%" height={14} style={{ marginTop: 12 }} delay={110} />
                       </GlassCard>
                     ) : !paymentsListening ? (
                       <GlassCard style={styles.sectionCard} blur={false}>
@@ -3650,7 +3616,11 @@ export default function App() {
             </KeyboardAvoidingView>
             </SafeAreaView>
 
-          {/* Bottom Absolute Black Fade Vignette Overlay */}
+          {/* Content sinking away behind the floating dock. It exists for the
+              dock, so it goes when the dock goes — over the full-screen menu it
+              is pure harm, and the elevation it carries makes it harm that
+              outranks most things put in front of it. */}
+          {!isDrawerOpen && (
           <View style={styles.bottomOverlayFade} pointerEvents="none">
             <Svg width="100%" height="100%">
               <Defs>
@@ -3665,6 +3635,7 @@ export default function App() {
               <Rect width="100%" height="100%" fill="url(#bottomOverlayBlackFade)" />
             </Svg>
           </View>
+          )}
 
           {/* Chat composer. Lives outside the ScrollView so it stays put while
               the transcript scrolls under it — a composer that scrolls away is
@@ -3678,11 +3649,17 @@ export default function App() {
                 { bottom: keyboardHeight > 0 ? keyboardHeight + 12 : TAB_BAR_BOTTOM + 78 },
               ]}
             >
-              <GlassCard style={styles.chatBarInner} tier="chrome" radius={THEME.borderRadius.xl}>
+              {/* blur={false} so the fill below actually applies: GlassCard
+                  forces a transparent background when it is blurring, and over
+                  the flat black of an empty transcript the blur has nothing to
+                  sample anyway. */}
+              <GlassCard style={styles.chatBarInner} tier="chrome" radius={THEME.borderRadius.xl} blur={false}>
                 <TextInput
                   style={styles.chatInput}
                   placeholder="Ask anything..."
-                  placeholderTextColor={THEME.ink[35]}
+                  // INK[55], not [35]: measured 4.35:1 on the S23, under the
+                  // AA floor, on the one control this screen exists for.
+                  placeholderTextColor={THEME.ink[55]}
                   value={chatInput}
                   onChangeText={setChatInput}
                   onSubmitEditing={sendChat}
@@ -3994,11 +3971,24 @@ export default function App() {
                 ]}
               >
                 <GlassBacking radius={0} tier="chrome" />
+
+                {/* At 280px the scrim beside the panel was the way out. A
+                    full-width panel covers every pixel of it, leaving only the
+                    back button and the swipe — neither of which announces
+                    itself. */}
+                <View style={styles.drawerTopRow}>
+                  <TouchableOpacity
+                    style={styles.drawerClose}
+                    onPress={() => toggleDrawer(false)}
+                    hitSlop={PRESS_HIT_SLOP}
+                  >
+                    <X size={22} color={THEME.ink[95]} />
+                  </TouchableOpacity>
+                </View>
+
                 <View style={styles.drawerProfileSection}>
-                  <View style={styles.drawerAvatar}>
-                    <Text style={styles.drawerAvatarText}>
-                      {welcomeName.charAt(0).toUpperCase()}
-                    </Text>
+                  <View style={styles.drawerAvatarWrap}>
+                    <Avatar uri={profile?.avatar_url} name={welcomeName} size={68} />
                   </View>
                   <Text style={styles.drawerProfileName}>{welcomeName}</Text>
                   <Text style={styles.drawerProfileEmail}>{session?.user?.email}</Text>
@@ -4072,6 +4062,14 @@ export default function App() {
                 <View style={styles.drawerFooter}>
                   <Text style={styles.drawerBrand}>NOVIA</Text>
                   <Text style={styles.drawerBrandTag}>Your companion, in sync.</Text>
+                  <TouchableOpacity
+                    style={styles.drawerCredit}
+                    onPress={openDeveloperLink}
+                    activeOpacity={0.7}
+                    hitSlop={PRESS_HIT_SLOP}
+                  >
+                    <Text style={styles.drawerCreditText}>Developed by Adarsh Aravind</Text>
+                  </TouchableOpacity>
                   <Text style={styles.drawerVersion}>
                     v{Constants.expoConfig?.version ?? '2.1.0'}
                     {Updates.updateId ? ` · ${Updates.updateId.slice(0, 8)}` : ' · dev'}
@@ -4100,6 +4098,29 @@ export default function App() {
                 <ScrollView style={styles.settingsBody} keyboardShouldPersistTaps="handled">
                   <View style={styles.settingsSection}>
                     <Text style={styles.settingsSectionTitle}>My Profile</Text>
+
+                    {/* "Tap your picture" is not a discoverable instruction, and
+                        Remove needs somewhere to live regardless. */}
+                    <View style={styles.photoRow}>
+                      <Avatar uri={profile?.avatar_url} name={welcomeName} size={52} />
+                      <View style={styles.photoActions}>
+                        <TouchableOpacity
+                          style={styles.photoBtn}
+                          onPress={changeProfilePhoto}
+                          disabled={avatarBusy}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={styles.photoBtnText}>
+                            {avatarBusy ? 'WORKING...' : profile?.avatar_url ? 'CHANGE PHOTO' : 'ADD PHOTO'}
+                          </Text>
+                        </TouchableOpacity>
+                        {profile?.avatar_url ? (
+                          <TouchableOpacity style={styles.photoBtn} onPress={removeProfilePhoto} activeOpacity={0.8}>
+                            <Text style={[styles.photoBtnText, { color: THEME.ink[70] }]}>REMOVE</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+                    </View>
                     
                     <View style={styles.inputGroup}>
                       <Text style={styles.inputLabel}>YOUR DISPLAY NAME</Text>
@@ -4551,9 +4572,19 @@ const styles = StyleSheet.create({
     paddingBottom: 96,
   },
   welcomeCard: {
+    // A row now, with the picture beside the two lines rather than a card
+    // around them: the greeting still sits as bare text on the backdrop.
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
     paddingHorizontal: THEME.spacing.xs,
     paddingVertical: THEME.spacing.md,
     marginBottom: THEME.spacing.sm,
+  },
+  welcomeText: {
+    // flex, so a long display name wraps or ellipsises instead of shoving the
+    // picture off the left edge.
+    flex: 1,
   },
   welcomeTitle: {
     color: THEME.colors.text,
@@ -5050,7 +5081,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 16,
     right: 16,
+    // elevation, not just zIndex. On Android elevation decides who draws on top
+    // across the tree, and the bottom vignette carries 8 — which is why the
+    // composer, sitting ~100dp up inside that 220dp band, was being painted
+    // over and reading as a washed-out bar.
     zIndex: 20,
+    elevation: 20,
   },
   chatBarInner: {
     flexDirection: 'row',
@@ -5059,6 +5095,19 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingLeft: 16,
     paddingRight: 8,
+    /*
+     * The composer sits on an empty black transcript, where a dark scrim on a
+     * dark ground is no surface at all: chrome's fill measured 1.03:1 against
+     * the page and the bar simply wasn't there.
+     *
+     * A fill can't fix that without turning into a light grey slab, so the rim
+     * carries the boundary — 0.45 white clears the 3:1 non-text floor at
+     * 3.9:1 — and the fill only lifts enough that the interior reads as a
+     * surface rather than a hole.
+     */
+    backgroundColor: alpha(THEME.ink[95], 0.09),
+    borderWidth: 1,
+    borderColor: alpha(THEME.ink[95], 0.45),
   },
   chatInput: {
     flex: 1,
@@ -5189,12 +5238,38 @@ const styles = StyleSheet.create({
   noteInput: {
     minHeight: 96,
   },
-  notesHeader: {
+  // A tab's title row. Named for the job, not for Notes, which was the only
+  // screen that had one when it was written.
+  tabHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: THEME.spacing.md,
     paddingHorizontal: THEME.spacing.xs,
+  },
+  /*
+   * The heading sits in the hottest part of the backdrop's corner burn, where
+   * the composite is roughly rgb(208, 87, 1) — accent orange on accent orange,
+   * which measured 1.45:1 on device and was effectively invisible. Neither
+   * white (3.74:1) nor pure white (4.16:1) clears AA against a ground that
+   * bright, so the fix is a scrim rather than a colour: chrome dims the burn to
+   * near-black and the same accent then reads at 6.25:1.
+   *
+   * Chrome's own shadow is sized for a nav bar; a chip this small takes the
+   * chip shadow instead, per the material rule that thickness tracks size.
+   */
+  tabHeaderChip: {
+    ...THEME.material.chrome,
+    ...THEME.shadow.chip,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: THEME.borderRadius.round,
+  },
+  tabHeaderText: {
+    fontSize: 13,
+    fontFamily: FONTS.heavy,
+    color: THEME.colors.primary,
+    letterSpacing: 1.5,
   },
   notesAddButton: {
     width: 42,
@@ -5927,19 +6002,40 @@ const styles = StyleSheet.create({
     ...THEME.material.chrome,
     // GlassBacking owns the fill (see tabBar), so this stays out of its way.
     backgroundColor: 'transparent',
-    // The rim reads as the lit edge of the panel against the dimmed screen, so
-    // it belongs on the side facing the content, not all the way around a pane
-    // that runs off three edges of the display.
+    // No rim and no cast shadow: both existed to separate a 280px pane from the
+    // dimmed screen beside it, and at full width that edge is off the display.
+    //
+    // The elevation stays, though, and dropping it is a trap. On Android
+    // elevation — not zIndex — decides who draws on top across the tree, and
+    // `bottomOverlayFade` carries elevation 8. At elevation 0 that vignette
+    // painted straight over the bottom of this panel: measured on the S23, the
+    // footer's own opaque fill came back as rgb(5,5,5) and the credit line at
+    // 1.05:1, which is to say invisible. shadowOpacity 0 is what removes the
+    // cast shadow; elevation is only here for the stacking.
     borderWidth: 0,
-    borderRightWidth: 1,
-    borderRightColor: THEME.rim.edge,
-    paddingTop: Platform.OS === 'ios' ? 60 : 40,
-    paddingHorizontal: 20,
-    zIndex: 1000,
-    shadowOffset: { width: 8, height: 0 },
-    shadowOpacity: 0.45,
-    shadowRadius: 24,
+    shadowOpacity: 0,
     elevation: 20,
+    // styles.container already offsets the tree past the status bar, so the old
+    // 40 was slack a full-height panel turns into a gap above the close row.
+    paddingTop: Platform.OS === 'ios' ? 20 : 12,
+    paddingHorizontal: 24,
+    // The panel now reaches the bottom of the window, which a 280px drawer never
+    // had to think about. Mirrors TAB_BAR_BOTTOM so the footer clears Android
+    // 3-button navigation.
+    paddingBottom: Platform.OS === 'android' ? Math.max(ANDROID_NAV_INSET + 8, 20) : 28,
+    zIndex: 1000,
+  },
+  drawerTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  drawerClose: {
+    ...THEME.material.well,
+    width: 40,
+    height: 40,
+    borderRadius: THEME.borderRadius.round,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   drawerFooter: {
     marginTop: 'auto',      // pins branding to the bottom of the drawer column
@@ -5955,13 +6051,29 @@ const styles = StyleSheet.create({
   drawerBrandTag: {
     fontFamily: FONTS.body,
     fontSize: 12,
-    color: THEME.ink[50],
+    // INK[70], not [50]. Measured on the S23 once the vignette stopped covering
+    // this footer, [50] came in at 4.47:1 — close enough to the AA floor to be
+    // a rounding error rather than a pass.
+    color: THEME.ink[70],
     marginTop: 2,
+  },
+  drawerCredit: {
+    alignSelf: 'flex-start',
+    marginTop: 10,
+  },
+  drawerCreditText: {
+    fontFamily: FONTS.semibold,
+    fontSize: 12,
+    // Accent, not INK[50]. It is the app's signal for tappable text, and INK[50]
+    // over the chrome panel measures 4.35:1 — under AA, on the one line in this
+    // footer that is meant to be pressed. Accent on the same ground is 6.57:1.
+    color: THEME.colors.primary,
   },
   drawerVersion: {
     fontFamily: FONTS.medium,
     fontSize: 11,
-    color: THEME.ink[35],
+    // Same measurement: INK[35] was 4.27:1 here, under the floor.
+    color: THEME.ink[50],
     marginTop: 8,
   },
   drawerProfileSection: {
@@ -5969,20 +6081,10 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
     marginBottom: 24,
   },
-  drawerAvatar: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: THEME.glass.accentStrong,
-    justifyContent: 'center',
-    alignItems: 'center',
+  // The avatar itself is a shared component now; this only carries the spacing
+  // the drawer's column wants beneath it.
+  drawerAvatarWrap: {
     marginBottom: 12,
-    ...THEME.shadow.glowAccent,
-  },
-  drawerAvatarText: {
-    fontSize: 24,
-    fontFamily: FONTS.bold,
-    color: THEME.colors.primary,
   },
   drawerProfileName: {
     fontSize: 18,
@@ -6012,7 +6114,7 @@ const styles = StyleSheet.create({
   drawerMenuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
+    paddingVertical: 16,
     paddingHorizontal: 12,
     borderRadius: 8,
     marginBottom: 8,
@@ -6078,6 +6180,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 14,
+  },
+  photoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginBottom: THEME.spacing.md,
+  },
+  photoActions: {
+    flex: 1,
+    gap: 8,
+  },
+  photoBtn: {
+    ...THEME.material.well,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: THEME.borderRadius.sm,
+    alignItems: 'center',
+  },
+  photoBtnText: {
+    fontFamily: FONTS.heavy,
+    fontSize: 11,
+    letterSpacing: 1.2,
+    color: THEME.colors.primary,
   },
   settingsSaveButton: {
     backgroundColor: THEME.colors.primary,
@@ -6147,82 +6272,6 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.bold,
     marginTop: 8,
     letterSpacing: 0.3,
-  },
-
-  // ---- Daily check-in ----
-  streakPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: THEME.borderRadius.round,
-    backgroundColor: alpha(THEME.colors.warning, 0.16),
-  },
-  streakPillText: {
-    color: THEME.colors.warning,
-    fontSize: 12,
-    fontFamily: FONTS.bold,
-    letterSpacing: 0.3,
-  },
-  checkInPrompt: {
-    color: THEME.ink[100],
-    fontSize: 14,
-    fontFamily: FONTS.medium,
-    marginTop: 10,
-    marginBottom: 12,
-  },
-  checkInEmojiRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  checkInEmojiBtn: {
-    flex: 1,
-    marginHorizontal: 3,
-    paddingVertical: 10,
-    borderRadius: THEME.borderRadius.sm,
-    backgroundColor: THEME.glass.inset,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkInEmojiBtnActive: {
-    backgroundColor: THEME.glass.accentStrong,
-    ...THEME.shadow.glowAccent,
-  },
-  checkInEmoji: {
-    fontSize: 22,
-  },
-  checkInEmojiLabel: {
-    color: THEME.ink[50],
-    fontSize: 10,
-    fontFamily: FONTS.semibold,
-    marginTop: 4,
-    letterSpacing: 0.2,
-  },
-  checkInPartnerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 16,
-    paddingTop: 14,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: THEME.colors.border,
-  },
-  checkInPartnerLabel: {
-    color: THEME.ink[95],
-    fontSize: 13,
-    fontFamily: FONTS.bold,
-  },
-  checkInPartnerValue: {
-    color: THEME.ink[55],
-    fontSize: 12,
-    fontFamily: FONTS.body,
-    marginTop: 2,
-  },
-  checkInPartnerMuted: {
-    color: THEME.ink[35],
-    fontSize: 12,
-    fontFamily: FONTS.body,
-    marginTop: 2,
   },
 
   // ---- Milestones / On this day ----

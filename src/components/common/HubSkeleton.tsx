@@ -18,16 +18,20 @@ import { Skeleton } from './Skeleton';
  * shape — the layout jumping under the user at the exact moment they are
  * forming a first impression of it.
  *
- * Matched to the hub as of the compact rewrite: greeting, one card holding both
- * moods, and the Step Duel with its seven-day graph.
+ * Matched to the hub as of the greeting rewrite: profile picture beside the
+ * greeting and name, one card holding both moods, and the Step Duel with its
+ * seven-day graph. The daily check-in card that used to sit below them is gone.
  */
 export function HubSkeleton() {
   return (
     <View style={styles.content}>
-      {/* Greeting — no longer offset for a floating hamburger. */}
+      {/* Greeting — a profile picture beside the greeting and the name. */}
       <View style={styles.welcome}>
-        <Skeleton width={190} height={34} radius={THEME.borderRadius.sm} />
-        <Skeleton width={130} height={22} radius={THEME.borderRadius.sm} style={styles.gapTop} delay={90} />
+        <Skeleton width={56} height={56} radius={28} />
+        <View style={styles.welcomeText}>
+          <Skeleton width={190} height={34} radius={THEME.borderRadius.sm} delay={60} />
+          <Skeleton width={120} height={22} radius={THEME.borderRadius.sm} style={styles.gapTop} delay={120} />
+        </View>
       </View>
 
       {/* "Right now" — partner mood, advice, and your own mood row. */}
@@ -73,9 +77,15 @@ const styles = StyleSheet.create({
     paddingTop: 20,
   },
   welcome: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
     paddingHorizontal: THEME.spacing.xs,
     paddingVertical: THEME.spacing.md,
     marginBottom: THEME.spacing.sm,
+  },
+  welcomeText: {
+    flex: 1,
   },
   card: {
     ...THEME.material.regular,

@@ -695,19 +695,29 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- record_transaction — the only write path for detected payments.
--- Both phones witness the same payment from opposite sides: his "You paid ₹500
--- to Gayathri" and her "₹500 received from Adarsh" are one event, and a naive
--- insert-on-both would show the couple every transfer twice.
+-- One payment can be witnessed up to four times, and every duplicate has to
+-- collapse to a single row.
 --
--- A dedup_key built from an amount plus a minute bucket cannot solve this on
--- its own: the two notifications land seconds apart and routinely straddle a
--- minute boundary, and the phones' clocks need not agree. So the pairing test
--- lives here instead, where both devices meet, and is deliberately narrow —
--- it merges only a row from the *other* partner, in the *opposite* direction,
--- for the same amount, within PAIR_WINDOW. Three minutes rather than one:
--- the carrier does not deliver the two banks' texts simultaneously, and a
--- window too tight shows the couple every transfer twice. Two genuine payments
--- of the same amount in the same direction are never collapsed.
+-- Across devices: his "Sent Rs.20.00 to GAYATHRI UDAYAN" and her "Received
+-- Rs.20.00 from ADARSH ARAVIND" are one event seen from opposite sides.
+--
+-- On one device: a phone with both sources enabled hears about the same
+-- payment from the bank's SMS *and* from the payment app's own notification.
+-- Those carry different source_packages, so their dedup_keys differ and the
+-- per-device unique constraint does not see them as the same thing.
+--
+-- A dedup_key cannot solve either case: the observations land seconds apart,
+-- routinely straddle a minute boundary, and across devices the clocks need not
+-- agree. So the test lives here, where everything meets, and each half is
+-- narrow enough not to swallow a real payment:
+--
+--   * the other partner, opposite direction — the cross-device pair;
+--   * the same user, same direction, but a *different source* — one phone
+--     hearing the same thing twice. Same source is excluded deliberately, so
+--     paying someone twice over is still two rows.
+--
+-- PAIR_WINDOW is three minutes rather than one because the carrier does not
+-- deliver the two banks' texts simultaneously.
 --
 -- The advisory lock serialises the check-then-insert per couple, so two
 -- devices posting simultaneously can't both miss each other's row.
@@ -741,14 +751,18 @@ BEGIN
 
     PERFORM pg_advisory_xact_lock(hashtextextended(v_couple_id::TEXT, 0));
 
-    -- The partner already logged this same payment from the other side.
+    -- Already logged: by the partner from the other side, or by this same
+    -- device through the other source.
     SELECT id INTO v_existing
     FROM public.transactions
     WHERE couple_id = v_couple_id
-      AND user_id <> auth.uid()
-      AND direction <> p_direction
       AND amount = p_amount
       AND occurred_at BETWEEN p_occurred_at - PAIR_WINDOW AND p_occurred_at + PAIR_WINDOW
+      AND (
+            (user_id <> auth.uid() AND direction <> p_direction)
+         OR (user_id  = auth.uid() AND direction  = p_direction
+             AND source_package IS DISTINCT FROM p_source_package)
+      )
     LIMIT 1;
 
     IF v_existing IS NOT NULL THEN

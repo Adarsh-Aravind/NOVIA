@@ -227,6 +227,31 @@ export function useAuth() {
     }
   };
 
+  /**
+   * Write (or clear) the profile picture.
+   *
+   * `avatar_url` holds a `data:image/jpeg;base64,...` string rather than a
+   * remote URL: the bytes live in the column, which is why there is no bucket,
+   * no storage policy and no signed-URL refresh anywhere in this app. See the
+   * size guard at the call site — a row this wide is only safe because the
+   * image is resized to 256px before it gets here.
+   *
+   * Unlike updateDisplayName above, this *throws*. That one swallows its error,
+   * which is why the try/catch around it can never fire; a picture that
+   * silently fails to save is worse, because the old one stays on screen and
+   * looks like it worked.
+   */
+  const updateAvatar = async (dataUri: string | null) => {
+    if (!session) return;
+    const { error } = await supabase
+      .from('profiles')
+      .update({ avatar_url: dataUri, updated_at: new Date().toISOString() })
+      .eq('id', session.user.id);
+
+    if (error) throw new Error(error.message);
+    if (profile) setProfile({ ...profile, avatar_url: dataUri });
+  };
+
   return {
     session,
     loading,
@@ -234,6 +259,7 @@ export function useAuth() {
     partnerProfile,
     coupleId,
     updateDisplayName,
+    updateAvatar,
     signUp,
     signIn,
     signOut,

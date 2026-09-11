@@ -7,7 +7,7 @@
     "icon": "./assets/novia-icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "runtimeVersion": "2",
+    "runtimeVersion": "3",
     "updates": {
       "url": "https://u.expo.dev/928a233f-606a-412b-9b2a-6c9e57eba586",
       "checkAutomatically": "ON_LOAD",
@@ -71,6 +71,12 @@
             "compileSdkVersion": 35,
             "targetSdkVersion": 35
           }
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "NOVIA uses your photos so you can set a profile picture."
         }
       ],
       "expo-secure-store",

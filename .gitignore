@@ -41,6 +41,10 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+# Gradle output inside the local native modules. /android above is root-anchored
+# and does not reach these, so a local build would otherwise stage its artifacts.
+modules/*/android/build/
+modules/*/android/.gradle/
 
 # IDE / Editor configurations
 .idea/
