@@ -239,6 +239,8 @@ export function useSteps(
   const lastSync = useRef<{ date: string; steps: number } | null>(null);
   // Held so a write can nudge the partner directly (see the effect below).
   const channelRef = useRef<RealtimeChannel | null>(null);
+  /** Latches a channel error so the rejoin can report that it cleared. */
+  const erroredOnce = useRef(false);
 
   /**
    * Best-effort nudge to the other device over the live socket.
@@ -505,10 +507,26 @@ export function useSteps(
       .on('broadcast', { event: 'steps_updated' }, () => fetchSeason())
       .on('broadcast', { event: 'forfeit_updated' }, () => fetchForfeit())
       .subscribe((state) => {
-        // A silent CHANNEL_ERROR is why a broken subscription looked like a
-        // working one for so long. Say something.
+        /*
+         * A silent CHANNEL_ERROR is why a broken subscription looked like a
+         * working one for so long. Say something — but say whether it
+         * recovered, too.
+         *
+         * The client rejoins on its own, so a socket blip and a permanently
+         * dead channel both surface as a single CHANNEL_ERROR and are
+         * otherwise indistinguishable in the log. Without the recovery line
+         * the only honest reading of a lone warning is "something might be
+         * broken", which is how an afternoon gets spent chasing a hiccup
+         * during a hot reload. The server was verified to accept every
+         * binding shape used here, so an error that never clears means the
+         * client, not the publication.
+         */
         if (state === 'CHANNEL_ERROR' || state === 'TIMED_OUT') {
-          console.warn('[Steps] Realtime channel', state);
+          erroredOnce.current = true;
+          console.warn('[Steps] Realtime channel', state, '— will retry');
+        } else if (state === 'SUBSCRIBED' && erroredOnce.current) {
+          erroredOnce.current = false;
+          console.log('[Steps] Realtime channel recovered');
         }
       });
     channelRef.current = channel;
