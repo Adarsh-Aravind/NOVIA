@@ -32,13 +32,19 @@
     </service>
 
     <!-- SMS_RECEIVED is a protected broadcast: only the system can send it, so
-         an exported receiver here is not an entry point for other apps. The
-         high priority is conventional for this action and does not abort
-         delivery to anyone else. -->
+         an exported receiver here is not an entry point for other apps, and
+         RECEIVE_SMS is what actually gates us reading them.
+
+         Deliberately NO android:permission. That attribute constrains the
+         *sender* to hold BROADCAST_SMS, and on this Samsung the effect was
+         that nothing was delivered at all: the receiver was registered
+         (confirmed in dumpsys), RECEIVE_SMS was granted, the app was not in
+         the stopped state, two Kotak messages arrived — and the capture queue
+         stayed empty with nothing in logcat. It is a sender-side check we gain
+         nothing from on a broadcast the system alone is allowed to send. -->
     <receiver
       android:name="expo.modules.notificationlistener.NoviaSmsReceiver"
-      android:exported="true"
-      android:permission="android.permission.BROADCAST_SMS">
+      android:exported="true">
       <intent-filter android:priority="999">
         <action android:name="android.provider.Telephony.SMS_RECEIVED" />
       </intent-filter>

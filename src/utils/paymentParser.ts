@@ -227,6 +227,15 @@ export function parsePayment(
     if (!matchesPartner(counterparty, partnerAliases)) {
       // A real payment, just not one between the two of them. Everything else
       // in their notification shade stays their own business.
+      //
+      // Say so in development, though. Without this a name that simply isn't
+      // on the alias list looks exactly like no message ever arriving, and
+      // that is the single most likely reason a feed stays empty — the bank
+      // prints the name it holds, which is rarely the app's display name.
+      if (__DEV__) {
+        console.log('[payments] not the partner:', JSON.stringify(counterparty),
+                    '— aliases:', JSON.stringify(partnerAliases));
+      }
       return null;
     }
 
