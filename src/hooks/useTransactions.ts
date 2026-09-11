@@ -159,15 +159,26 @@ export function useTransactions(
 
     ingesting.current = true;
     try {
-      const retryRaw = await AsyncStorage.getItem(RETRY_KEY);
+      /*
+       * Read storage BEFORE draining.
+       *
+       * drainPending() is destructive — the entries leave the device the
+       * instant it returns. If a storage read threw after that, the captures
+       * would be gone with nowhere to put them. Doing every fallible thing
+       * that doesn't cost anything first means the drain happens only once
+       * there is somewhere to put the result.
+       */
+      const [retryRaw, seenRaw] = await Promise.all([
+        AsyncStorage.getItem(RETRY_KEY),
+        AsyncStorage.getItem(SEEN_KEY),
+      ]);
       const retries: CapturedNotification[] = retryRaw ? JSON.parse(retryRaw) : [];
+      const seen: string[] = seenRaw ? JSON.parse(seenRaw) : [];
+      const seenSet = new Set(seen);
+
       // Retries first: they are older, and the feed reads better in order.
       const pending = [...retries, ...drainPending()];
       if (pending.length === 0) return;
-
-      const seenRaw = await AsyncStorage.getItem(SEEN_KEY);
-      const seen: string[] = seenRaw ? JSON.parse(seenRaw) : [];
-      const seenSet = new Set(seen);
 
       const failed: CapturedNotification[] = [];
       let posted = 0;
@@ -176,35 +187,45 @@ export function useTransactions(
         const key = rawKey(notification);
         if (seenSet.has(key)) continue;
 
-        const payment = parsePayment(notification, aliasRef.current);
-        if (!payment) {
-          // Not a payment between them. Nothing to upload, but remember it so
-          // the same message is not re-parsed on every future drain.
+        // Per entry, so one unparseable message or one thrown request cannot
+        // cost the whole batch. Without this the outer catch swallows the
+        // error and the persist below never runs, which loses every capture
+        // drained in this pass — precisely what the retry queue exists to
+        // prevent.
+        try {
+          const payment = parsePayment(notification, aliasRef.current);
+          if (!payment) {
+            // Not a payment between them. Nothing to upload, but remember it
+            // so the same message is not re-parsed on every future drain.
+            seenSet.add(key);
+            seen.push(key);
+            continue;
+          }
+
+          const { error } = await supabase.rpc('record_transaction', {
+            p_direction: payment.direction,
+            p_amount: payment.amount,
+            p_counterparty: payment.counterparty,
+            p_source_package: payment.sourcePackage,
+            p_occurred_at: payment.occurredAt,
+            p_dedup_key: payment.dedupKey,
+          });
+
+          if (error) {
+            console.error('[Payments] Record failed:', error.message);
+            // Hold the capture itself, not just the fact that it failed — the
+            // native queue has already let go of it.
+            failed.push(notification);
+            continue;
+          }
+
           seenSet.add(key);
           seen.push(key);
-          continue;
-        }
-
-        const { error } = await supabase.rpc('record_transaction', {
-          p_direction: payment.direction,
-          p_amount: payment.amount,
-          p_counterparty: payment.counterparty,
-          p_source_package: payment.sourcePackage,
-          p_occurred_at: payment.occurredAt,
-          p_dedup_key: payment.dedupKey,
-        });
-
-        if (error) {
-          console.error('[Payments] Record failed:', error.message);
-          // Hold the capture itself, not just the fact that it failed — the
-          // native queue has already let go of it.
+          posted += 1;
+        } catch (e: any) {
+          console.error('[Payments] Entry failed:', e?.message ?? e);
           failed.push(notification);
-          continue;
         }
-
-        seenSet.add(key);
-        seen.push(key);
-        posted += 1;
       }
 
       await AsyncStorage.multiSet([

@@ -2096,9 +2096,14 @@ export default function App() {
   );
 
   const [avatarBusy, setAvatarBusy] = useState(false);
+  // The ref is the guard; the state is only what the button renders. setState
+  // does not land before the next tap can read it, so two quick presses both
+  // see avatarBusy === false and both open a picker.
+  const avatarBusyRef = useRef(false);
 
   const changeProfilePhoto = async () => {
-    if (avatarBusy) return;
+    if (avatarBusyRef.current) return;
+    avatarBusyRef.current = true;
     setAvatarBusy(true);
     try {
       const result = await pickProfilePhoto();
@@ -2111,6 +2116,7 @@ export default function App() {
     } catch (e: any) {
       Alert.alert('Could not save', e?.message ?? 'Please try again.');
     } finally {
+      avatarBusyRef.current = false;
       setAvatarBusy(false);
     }
   };
