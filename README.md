@@ -23,6 +23,7 @@ Everything one partner does shows up on the other's phone within a second or two
 - [Detected Payments](#detected-payments) · [Profile Pictures](#profile-pictures)
 - [Project Structure](#project-structure) · [Local Development](#local-development)
 - [Demo Build](#demo-build) · [Deployment & Updates](#deployment--updates)
+- [License](#license)
 
 ## Features at a Glance
 
@@ -407,5 +408,22 @@ eas build --platform android --profile production
 ```
 
 `runtimeVersion` is pinned to a literal in `app.json`, so **nothing bumps it for you**. Raise it by hand in the same commit as any native change, or an OTA published afterwards will be served to older installs that lack the new module. It is currently `3`; installs built against an older value keep the last bundle published for that value.
+
+## License
+
+NOVIA is **fair source**, released under the [Functional Source License, Version 1.1, ALv2 Future License](LICENSE.md) (`FSL-1.1-ALv2`).
+
+**In plain terms.** This summary is not the licence. [LICENSE.md](LICENSE.md) is what applies.
+
+- ✅ **You can** read, run, copy and change the code for any purpose that doesn't compete with NOVIA. For example:
+  - for yourself, or inside your own organisation;
+  - for non-commercial education and research;
+  - when doing professional services for someone who uses NOVIA under these terms.
+- ✅ **You can** share your changes, as long as you include the licence and keep the copyright notice.
+- ❌ **You can't** make NOVIA, or anything with the same or substantially similar features, available as a **commercial product or service that competes with it**. For example, you can't sell or monetise a copy or a rebrand of the app on an app store.
+- ❌ **You can't** use the NOVIA name, logo or other trademarks, except to credit where the code came from.
+- ⏳ **Every version becomes fully open source two years after it's released.** From that date it's also available under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0), with no competing-use restriction.
+
+**Commercial use.** Want to build a product on NOVIA, license it, or partner on it? Get in touch through [adarsharavind.com](https://www.adarsharavind.com) and we can agree separate terms.
 
 <3

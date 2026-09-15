@@ -1,6 +1,7 @@
 {
   "name": "novia",
   "version": "2.1.0",
+  "license": "FSL-1.1-ALv2",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
