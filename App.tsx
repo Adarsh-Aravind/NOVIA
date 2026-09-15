@@ -45,6 +45,7 @@ import { StepGraph } from './src/components/common/StepGraph';
 import { configureNotificationsAsync, PRIORITY_CHANNEL } from './src/services/notification';
 import { cancelScheduledNotificationsByPrefix, scheduleLocalNotification } from './src/services/notification';
 import { supabase } from './src/services/supabase';
+import { IS_DEMO } from './src/demo/config';
 import { applyPendingUpdate, checkAndApplyUpdate, fetchAppUpdates, fetchUpdateInBackground, getLastSeenUpdateAt, markUpdatesSeen, unseenUpdates } from './src/services/updates';
 import { claimNotification, getOrCreateBaseline, pruneNotifiedMarkers } from './src/services/notifyOnce';
 import { withLock } from './src/utils/asyncLock';
@@ -2381,7 +2382,9 @@ export default function App() {
             </TouchableOpacity>
 
             <Text style={styles.authNote}>
-              NOVIA requires valid Supabase DB connectivity to authenticate client sessions.
+              {IS_DEMO
+                ? 'Demo build — any email and passphrase signs you in. All data is fictional and stays on this phone.'
+                : 'NOVIA requires valid Supabase DB connectivity to authenticate client sessions.'}
             </Text>
           </View>
         </ScrollView>

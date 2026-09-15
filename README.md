@@ -203,6 +203,24 @@ npx expo start --dev-client
 
 The dev build shares its package name with production, so it replaces the release app on that device.
 
+## Demo Build
+
+A demo APK is attached to the [GitHub releases](https://github.com/Adarsh-Aravind/NOVIA/releases). It needs no account, no backend and no API keys:
+
+- **Backend** — an in-memory stand-in for Supabase (`src/demo/demoSupabase.ts`) seeded with fictional data (`src/demo/seed.ts`). Everything you add works, and it all resets when the app restarts.
+- **Assistant** — scripted replies instead of Groq (`src/demo/demoAssistant.ts`).
+- **Steps and payments** — shown from seed data. The demo never reads Health Connect, texts or notifications, and the APK doesn't request those permissions.
+- **Installs alongside the real app** as `com.iitznova.novia.demo`, with OTA updates switched off so it can never pull a production bundle.
+
+All of it hangs off one build-time flag, `EXPO_PUBLIC_DEMO_MODE=1` (read by `src/demo/config.ts` and `app.config.js`). To build it yourself, from a clean checkout so no `.env` is bundled:
+
+```bash
+EXPO_NO_DOTENV=1 EXPO_PUBLIC_DEMO_MODE=1 npx expo prebuild --platform android --clean
+cd android && EXPO_NO_DOTENV=1 EXPO_PUBLIC_DEMO_MODE=1 ./gradlew assembleRelease
+```
+
+The release variant is signed with the debug keystore — fine for sideloading a demo, not for a store.
+
 ## Deployment & Updates
 
 ### Over-the-air

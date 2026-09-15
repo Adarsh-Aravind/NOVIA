@@ -13,6 +13,7 @@ import {
 import { supabase } from '../services/supabase';
 import { parsePayment } from '../utils/paymentParser';
 import { Transaction } from '../types';
+import { IS_DEMO } from '../demo/config';
 
 /** How far back the feed reaches. Older rows stay in the table, just unfetched. */
 const FEED_LIMIT = 100;
@@ -101,7 +102,11 @@ export function useTransactions(
 
   // Read once: the aliases and ids change, but the native module either exists
   // in this binary or never will.
-  const supported = useRef(isAvailable()).current;
+  //
+  // The demo build shows the seeded feed but never touches the listener: it
+  // ships without the SMS and notification-access permissions, so `supported`
+  // is false there and the screen is told below that everything is granted.
+  const supported = useRef(!IS_DEMO && isAvailable()).current;
 
   // The ingest path runs from a native callback and from an AppState change,
   // neither of which re-renders first — so it reads its inputs from refs to
@@ -363,6 +368,21 @@ export function useTransactions(
       appSub.remove();
     };
   }, [supported, coupleId, ingest, recheckPermission]);
+
+  if (IS_DEMO) {
+    return {
+      transactions,
+      loading,
+      supported: true,
+      permitted: true,
+      batteryExempt: true,
+      smsGranted: true,
+      requestSms: async () => {},
+      permissionsChecked: true,
+      refresh: fetchTransactions,
+      recheckPermission: () => {},
+    };
+  }
 
   return {
     transactions,

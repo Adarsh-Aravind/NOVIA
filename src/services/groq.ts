@@ -15,6 +15,9 @@
  * change.
  */
 
+import { IS_DEMO } from '../demo/config';
+import { demoChatReply, demoIdeas } from '../demo/demoAssistant';
+
 const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 
 /**
@@ -112,6 +115,7 @@ const CHAT_SYSTEM_PROMPT = [
  */
 export async function chatWithAI(messages: ChatMessage[]): Promise<ChatResult> {
   if (messages.length === 0) return { reply: '' };
+  if (IS_DEMO) return { reply: await demoChatReply(messages[messages.length - 1].content) };
   const { text, error } = await callGroq(
     [{ role: 'system', content: CHAT_SYSTEM_PROMPT }, ...messages],
     0.7
@@ -135,6 +139,7 @@ function parseIdeas(text: string): string[] {
 export async function generateIdeas(prompt: string): Promise<IdeaResult> {
   const trimmed = prompt.trim();
   if (!trimmed) return { ideas: [] };
+  if (IS_DEMO) return { ideas: await demoIdeas(trimmed) };
 
   const { text, error } = await callGroq(
     [

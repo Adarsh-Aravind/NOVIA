@@ -3,6 +3,8 @@ import { AppState, Platform } from 'react-native';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../services/supabase';
 import { StepCount, StepForfeit } from '../types';
+import { IS_DEMO } from '../demo/config';
+import { demoTodaySteps } from '../demo/seed';
 
 /**
  * Step Duel — daily step competition with a quarterly season.
@@ -119,6 +121,8 @@ const hasStepsRead = (perms: { accessType: string; recordType: string }[]): bool
  * request is gesture-driven via requestStepsAccess(). See [[useSteps]].
  */
 async function readOwnSteps(): Promise<{ status: StepsStatus; steps: number }> {
+  // The demo has no Health Connect data to show, so it walks a fictional day.
+  if (IS_DEMO) return { status: 'ready', steps: demoTodaySteps() };
   if (Platform.OS !== 'android') return { status: 'unavailable', steps: 0 };
 
   const hc = getHealthConnect();
@@ -150,6 +154,7 @@ async function readOwnSteps(): Promise<{ status: StepsStatus; steps: number }> {
  * granted.
  */
 async function requestStepsAccess(): Promise<boolean> {
+  if (IS_DEMO) return true;
   if (Platform.OS !== 'android') return false;
 
   const hc = getHealthConnect();
