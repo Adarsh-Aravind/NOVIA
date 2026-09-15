@@ -6,28 +6,190 @@
   </a>
 </p>
 
-NOVIA (Noviris) is a React Native application built for two people — a shared surface for staying connected, organised and a little bit competitive.
+NOVIA (Noviris) is a private Android app for two people. It's one shared space where a couple keeps notes, plans, dates, health and money in sync, and competes a little along the way.
+
+Everything one partner does shows up on the other's phone within a second or two, and reminders fire on both phones.
+
+> **Try it without an account.** A demo APK with made-up data, no backend and no API keys is on the [releases page](https://github.com/Adarsh-Aravind/NOVIA/releases/latest). See [Demo Build](#demo-build).
+
+## Contents
+
+- [Features at a Glance](#features-at-a-glance)
+- [Feature Guide](#feature-guide)
+- [Notifications](#notifications)
+- [Privacy & Security](#privacy--security)
+- [System Architecture](#system-architecture)
+- [Design System](#design-system)
+- [Detected Payments](#detected-payments) · [Profile Pictures](#profile-pictures)
+- [Project Structure](#project-structure) · [Local Development](#local-development)
+- [Demo Build](#demo-build) · [Deployment & Updates](#deployment--updates)
+
+## Features at a Glance
+
+| Feature | What it does | Where |
+| --- | --- | --- |
+| **Right Now** | Share how you feel, see your partner's mood, and get advice on how to respond | Hub |
+| **Step Duel** | A daily step race from Health Connect, with a 7-day graph, quarterly season, win streaks and a forfeit | Hub |
+| **On This Day** | Anniversaries and milestones landing today, plus what's coming up | Hub |
+| **Shared Notes** | A live note grid with emoji reactions and a typing indicator | Notes tab |
+| **Detected Payments** | Money sent between you, read from bank texts. Nothing to enter by hand | Payments tab |
+| **Chat & Ideas** | An AI assistant for questions, plus a date and gift idea generator | AI tab |
+| **Cycle Tracking** | Period, fertile window and ovulation predictions with a symptom check-in | Health tab |
+| **Hospital Visit Log** | A shared record of visits, reasons and test results | Health tab |
+| **Shared Todos** | One list with reminders on both phones, one-off or repeating | Hub → Todo List |
+| **Milestones** | Anniversaries and dates, repeating yearly or monthly, with reminders | Hub → Milestones |
+| **Complaint Box** | Raise an issue, talk it through in replies, and mark it resolved | Hub → Complaint Box |
+| **Bucket List** | Experiences you want to share, ticked off together | Hub → Bucket List |
+| **Word of the Day** | A new word each morning, by notification and on the hub | Hub |
+| **Profile & Pairing** | Profile picture, display name, sync-key pairing and an in-app changelog | Menu |
+
+## Feature Guide
+
+### Hub
+
+The home screen. It opens with a time-of-day greeting and your profile picture. Tap the picture to change or remove it. The cards below it are:
+
+- **Right Now.** Your partner's current mood, with a short suggestion for what to do about it. For example, when they're *Overwhelmed* it suggests taking over the pending chores and saving serious conversations for later. Below it you set your own mood: *Happy*, *Overwhelmed*, *Exhausted* or *Low Energy*. The change reaches your partner instantly. When they're writing a note, a *"Companion is active in shared notes..."* line appears here too.
+- **Step Duel.** Your steps against theirs for today, with a seven-day comparison graph. It also shows:
+  - **Streak:** who has won the most days in a row.
+  - **Season:** a tally of daily wins for the calendar quarter, with the days left.
+  - **Stakes:** a forfeit the season's loser owes, such as "loser cooks dinner for a week". Either partner can set or edit it.
+
+  Your own steps come from Health Connect. Access is requested only when you tap, never automatically at launch. The duel refreshes when the app comes to the front and every minute while it's open.
+- **On This Day.** Milestones that fall today, with how long ago they started (for example "3 years"), then the next month's upcoming ones. There's a link to manage them.
+- **Cycle.** A summary showing the current phase, cycle day, days until the next period, average cycle length and a progress bar. It links to the full tracker.
+- **Shortcuts** to Todo List, Complaint Box, Bucket List, Milestones, and Health & Cycle.
+- **Word of the Day.** Today's word and its meaning, on one line.
+
+### Shared Notes
+
+A grid of notes both partners can write in and read.
+
+- **Live.** A new note appears on the other phone without refreshing.
+- **Reactions.** Each partner can put one reaction on a note: ❤️ 😂 👍 🥺 🔥. Tapping the same one again removes it.
+- **Typing indicator.** While you write, your partner's hub shows that you're active.
+- The composer menu opens **Get ideas from AI**. Any idea it gives can be saved as a note with one tap.
+
+### Detected Payments
+
+A feed of money moving between the two of you, grouped by day, with direction (sent or received), amount, the other person's name and the source (Bank SMS, Google Pay, PhonePe, Paytm, PayPal or SBI). Nobody types anything in.
+
+- **Setup is one tap.** *Allow payment texts* grants SMS access. There's also an option to watch payment-app notifications instead, through Settings → Notification access.
+- **Match names.** Banks often show a longer or differently spelled name than the profile ("PRIYA SHARMA" instead of "Priya"). *Match names* on the Payments screen lets you add the spellings your bank uses.
+- **Battery warning.** If battery saving could put the app to sleep and stop detection, a banner offers to exempt it.
+- **Only the parsed details are stored:** amount, direction, name, time and source. The text itself never leaves the phone.
+
+Android only. The full design is in [Detected Payments](#detected-payments) below.
+
+### Chat & Ideas
+
+- **Chat.** Ask the assistant anything: relationship questions, plans or something unrelated. The conversation is sent each turn, capped to the most recent 20 messages.
+- **Ideas.** Describe what you're after, like "dates", "gifts" or "what to say after an argument", and get three to five specific, affordable suggestions. Tap one to save it to Shared Notes.
+
+The assistant only ever receives what you type. Moods, cycle data, steps and payments are never sent to it.
+
+### Health & Cycle
+
+**Cycle Tracker**
+
+- **Logging.** Record a period start and an optional end date, plus a short symptom check-in: flow, physical symptoms, fluid, emotional state and energy.
+- **Predictions.**
+  - The average cycle length comes from your recent logged cycles. Implausible gaps, like a duplicate log or a months-long break, are ignored. Without history it assumes 28 days.
+  - The average period length comes from logged end dates.
+  - The model rolls forward to the cycle you're actually in today, so a missed log doesn't leave a stale prediction.
+- **What it shows.** Current phase (Menstruation, Follicular, Ovulation or Luteal), cycle day, next period date, fertile window and ovulation day.
+- **Symptoms can correct the phase, but only when they're plausibly current.** Bleeding counts only around the expected period, and egg-white fluid only inside the fertile window.
+- **Guidance.** A "what's happening" summary and practical tips for the partner, based on the phase and what was logged.
+- **Reminder.** A heads-up the morning before the predicted start, or that morning if the day before has already passed.
+
+**Hospital Visit Log**
+
+Record a visit's date, reason and test results or doctor's notes. Both partners see both partners' visits, newest first, and can open one to read the details.
+
+### Shared Todos
+
+- Add a task with optional notes, a first reminder date and time, and whether it repeats: once, weekly, monthly or yearly.
+- **Both phones get the reminder**, because each phone schedules it from the same shared list.
+- Tick tasks off or delete them. Completed tasks stop reminding.
+
+### Milestones
+
+- Add a date with a title, an emoji and whether it repeats: yearly, monthly or once.
+- On the day you both get *"Today: Anniversary — 3 years today."* Yearly and one-off milestones also get a reminder the day before, so there's time to plan.
+- Milestones feed the *On This Day* card on the hub.
+
+### Complaint Box
+
+A structured place to raise an issue, so it isn't lost in chat.
+
+- File one with a title and an optional description. Your partner gets a notification straight away.
+- Open it to discuss it in **threaded replies**.
+- **Mark resolved** when it's settled, or **Reopen** it if it isn't. Whoever filed a complaint can delete it.
+
+### Bucket List
+
+Experiences you want to share, each with a title and an optional description. Tick one off when you've done it. The app records who completed it and when. Changes show up live on both phones.
+
+### Menu
+
+The full-screen side menu, opened from the tab bar:
+
+- **Cycle Tracker** shortcut.
+- **Changelog.** Release notes published in-app. New entries also send a notification.
+- **Settings:**
+  - **My Profile:** your display name and profile picture.
+  - **Sync Key.**
+  - **Unpair Partner**, under *Danger Zone*.
+- **Sign Out.**
+
+### Accounts & Pairing
+
+1. Each partner registers with an email, a password and a display name.
+2. Until you're paired, the app shows your **sync key**, which is your user ID. Send it to your partner.
+3. One of you pastes the other's key. Pairing runs through a server-side function (`pair_with_partner`), not direct table writes. Treat the key like a private invite, because anyone who has it can pair with you.
+4. After that, every feature is shared between the two accounts. **Unpair** separates them again.
+
+## Notifications
+
+All reminders are local notifications, scheduled on each phone from the shared data, so both partners get them without a push server.
+
+| Notification | When |
+| --- | --- |
+| **Todo reminder** | At the time you chose, then weekly, monthly or yearly if it repeats |
+| **Milestone** | On the day, plus the day before for yearly and one-off milestones |
+| **Cycle reminder** | The morning before the predicted period, or that morning |
+| **New complaint** | As soon as your partner files one. Uses the priority channel |
+| **Word of the Day** | Daily, scheduled 14 days ahead and topped up each time the app opens |
+| **App update** | When a new changelog entry is published |
+
+Tapping a notification opens the matching screen. Reminders are rescheduled by key whenever the data changes, and one-off alerts such as new complaints and app updates are claimed once per device. Reopening the app doesn't repeat them.
+
+## Privacy & Security
+
+- **Row Level Security** on every table. Each partner can read and write only their own couple's data.
+- **Sessions are encrypted at rest** in the device keystore through `expo-secure-store`, not stored as plaintext in AsyncStorage.
+- **Pairing and payment writes go through server-side functions** (`pair_with_partner`, `unpair`, `record_transaction`). They identify the caller from their session, not from anything the app sends.
+- **Payment texts are parsed on the device.** Only the amount, direction, name, time and source are uploaded.
+- **The AI assistant receives only what you type.** No moods, cycle data, steps or payments.
+- **Profile pictures** are resized to 256px and stored in the profile row, so there's no public storage bucket.
 
 ## System Architecture
 
-- **Frontend:** React Native 0.81 on Expo SDK 54, New Architecture enabled.
-- **Backend:** Supabase — PostgreSQL for relational data, Row Level Security for access control, and Realtime for cross-device sync.
-- **Deployment:** EAS builds the native binaries; JavaScript-only changes ship over the air without a reinstall.
+- **Frontend:** React Native 0.81 on Expo SDK 54, with the New Architecture enabled.
+- **Backend:** Supabase. PostgreSQL holds the data, Row Level Security controls access, and Realtime syncs changes between devices. Realtime uses `postgres_changes` plus broadcast messages for instant updates.
+- **AI:** Groq's chat completions API (`openai/gpt-oss-120b`).
+- **Native:**
+  - Health Connect for steps.
+  - A local Expo module for SMS and notification capture.
+  - `expo-notifications` for local reminders.
+- **Deployment:** EAS builds the native apps. JavaScript-only changes ship over the air, with no reinstall.
 
-**Platform note:** the app runs on both platforms, but the Step Duel depends on Health Connect, which is Android-only. On iOS that card degrades to an "unavailable" state and everything else works. Native modules are loaded through guarded `require`s specifically so a build that lacks them fails soft instead of white-screening.
+**Platform note:** the app is built for Android.
+- On iOS, the Step Duel shows as unavailable because Health Connect is Android-only.
+- Payment detection is also unavailable on iOS.
+- Everything else works on both platforms.
 
-## Core Features
-
-- **Step Duel** — a daily step competition sourced from Health Connect, with a seven-day comparison graph, a quarterly season tally, win streaks, and a shared forfeit the season's loser owes.
-- **Relationship Milestones** — anniversaries and one-off dates, with day-of and day-before local notifications on both devices.
-- **Right Now** — each partner's current mood, visible to the other the moment it changes, with phase-aware advice on what to do about it.
-- **Complaint Threads** — a structured, realtime channel for working through disagreements.
-- **Shared Notes** — a realtime note grid with emoji reactions and a live typing indicator.
-- **Shared Tasks** — a synchronised todo list with recurrence and reminders on both phones.
-- **Detected Payments** — money moving between the two of them, read off the bank's own SMS and logged without anyone entering anything. Android only.
-- **Cycle Tracking** — predictive period and ovulation modelling with phase-aware guidance.
-- **Ideas & Chat** — a Groq-backed assistant. A free-form chat tab, plus an idea generator reachable from the notes composer whose suggestions save straight to a shared note. It sends only what you type: no moods, cycle data or step history ever leave the device through it.
-- **Vocabulary Builder** — a word a day, delivered by notification.
+Native modules are loaded through guarded `require`s. That way a build without a module disables one feature instead of crashing to a white screen.
 
 ## Design System
 
@@ -38,8 +200,6 @@ The visual language lives in [`src/constants/theme.ts`](src/constants/theme.ts) 
 The consequence to design around is that **hue can no longer carry meaning**. Success, warning and danger are not green/amber/red. States are separated by *intensity* instead, backed by icons and explicit wording wherever the distinction matters. Intensity also survives greyscale and colour-vision deficiency, which a five-hue scale does not.
 
 **Materials are dark scrims, not light tints.** `THEME.material.*` composes fill, rim and graded shadow into one spread across four tiers (`thin` / `regular` / `thick` / `chrome`, plus `well` for carved surfaces). They *dim* what sits behind them rather than lightening it — a light tint over the backdrop's orange corner burn turns the card orange and drops accent text to 1.92:1.
-
-**The assistant needs a key.** `EXPO_PUBLIC_GROQ_API_KEY` in `.env` — see [console.groq.com](https://console.groq.com). Note that `EXPO_PUBLIC_*` values are compiled into the JS bundle and readable by anyone who unzips the APK, so this is fine for a free-tier key (the exposure is rate-limit abuse) and not fine for a paid one. Put a server-side proxy in front before spending real money through it. Env vars are read when the bundler **starts**, so adding one means restarting Metro, not just reloading the app.
 
 **Motion is springs, not durations.** `SPRING.*` encodes Apple's two-parameter model (damping ratio + response) converted to React Native's `stiffness`/`damping`/`mass`. Springs animate from wherever a value currently *is*, so they can be re-targeted mid-flight; a fixed-duration curve restarts from the head of its easing and visibly stutters. Bounce is reserved for motion a gesture actually threw.
 
@@ -140,11 +300,14 @@ App.tsx               # every screen and the StyleSheet — the app is one compo
 index.ts              # registerRootComponent
 schema.sql            # full database: tables, RLS policies, RPCs, realtime publication
 supabase/migrations/  # incremental migrations to run against an existing project
-plugins/              # local Expo config plugins (Health Connect permission delegate)
+app.json              # Expo config: package, permissions, plugins, runtimeVersion
+app.config.js         # layers the demo build over app.json when EXPO_PUBLIC_DEMO_MODE=1
+plugins/              # local Expo config plugins (Health Connect delegate, demo manifest)
 modules/              # local native modules (Android notification + SMS listener)
 src/
 ├── components/common/  # Skeleton, HubSkeleton, GlassCard, StepGraph, Avatar
 ├── constants/          # theme (colour, material, type), motion, vocabulary
+├── demo/               # demo build: in-memory backend, fictional seed data, scripted assistant
 ├── hooks/              # Supabase data + auth hooks, one per feature
 ├── services/           # notifications, OTA updates, encrypted session storage, photo pipeline
 ├── types/              # database row shapes
@@ -158,6 +321,8 @@ src/
 - Node.js 18+
 - A configured Supabase project
 - An EAS account (`npx eas-cli login`)
+- A Groq API key for Chat & Ideas (optional; everything else works without it)
+- For local native builds only: JDK 17 and the Android SDK
 
 ### Setup
 
@@ -170,6 +335,8 @@ cp eas.example.json eas.json
 ```
 
 Use the **publishable** (or legacy `anon`) key — never the `service_role` key, which bypasses Row Level Security and would give anyone holding the APK full access to the database.
+
+**The assistant needs a key.** `EXPO_PUBLIC_GROQ_API_KEY` in `.env` — see [console.groq.com](https://console.groq.com). Note that `EXPO_PUBLIC_*` values are compiled into the JS bundle and readable by anyone who unzips the APK, so this is fine for a free-tier key (the exposure is rate-limit abuse) and not fine for a paid one. Put a server-side proxy in front before spending real money through it. Env vars are read when the bundler **starts**, so adding one means restarting Metro, not just reloading the app.
 
 ### Database
 
@@ -239,6 +406,6 @@ Anything touching native code — a new native dependency, an `app.json` plugin,
 eas build --platform android --profile production
 ```
 
-`runtimeVersion` is pinned to a literal in `app.json`, so **nothing bumps it for you**. Raise it by hand in the same commit as any native change, or an OTA published afterwards will be served to older installs that lack the new module. It is at `2` as of the notification/SMS listener; installs still on `1` keep the last bundle that ran without it.
+`runtimeVersion` is pinned to a literal in `app.json`, so **nothing bumps it for you**. Raise it by hand in the same commit as any native change, or an OTA published afterwards will be served to older installs that lack the new module. It is currently `3`; installs built against an older value keep the last bundle published for that value.
 
 <3
