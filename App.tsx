@@ -985,7 +985,7 @@ export default function App() {
    * Extra names to match against, kept on the device.
    *
    * The name a payment app shows is whatever the bank has on file, and it is
-   * routinely not the name in the app's profile — "G Udhayan", a maiden name,
+   * routinely not the name in the app's profile — "P Sharma", a maiden name,
    * an initial. Rather than guess at those, the screen lets the user add the
    * name they actually see, which is the only reliable source for it.
    */
@@ -3753,7 +3753,7 @@ export default function App() {
 
                 <TextInput
                   style={[styles.input, { marginTop: 14 }]}
-                  placeholder="Gayathri Udhayan, G Udhayan"
+                  placeholder="Name as your bank shows it"
                   placeholderTextColor={THEME.ink[35]}
                   value={aliasDraft}
                   onChangeText={setAliasDraft}

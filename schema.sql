@@ -698,8 +698,8 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
 -- One payment can be witnessed up to four times, and every duplicate has to
 -- collapse to a single row.
 --
--- Across devices: his "Sent Rs.20.00 to GAYATHRI UDAYAN" and her "Received
--- Rs.20.00 from ADARSH ARAVIND" are one event seen from opposite sides.
+-- Across devices: his "Sent Rs.20.00 to PRIYA SHARMA" and her "Received
+-- Rs.20.00 from RAHUL VERMA" are one event seen from opposite sides.
 --
 -- On one device: a phone with both sources enabled hears about the same
 -- payment from the bank's SMS *and* from the payment app's own notification.

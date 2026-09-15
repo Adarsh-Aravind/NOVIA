@@ -30,7 +30,7 @@ export interface ParsedPayment {
 /**
  * Ordered most-specific first. `amountAt`/`nameAt` are capture-group indices,
  * because the phrasings disagree about word order: a bank SMS puts the amount
- * before the name ("Sent Rs.20.00 ... to GAYATHRI UDAYAN") and a payment app
+ * before the name ("Sent Rs.20.00 ... to PRIYA SHARMA") and a payment app
  * sometimes puts the name first ("Adarsh paid you Rs.500").
  *
  * The currency prefix is optional and loose — ₹, Rs, Rs., INR, or nothing at
@@ -50,7 +50,7 @@ const GAP = String.raw`(?:[^.]{0,60}?)?\s+`;
  * A guard for the patterns that begin with a bare amount.
  *
  * The currency prefix is optional, so without this an account number reads as
- * a figure: "A/c XX2946 paid to GAYATHRI UDAYAN" would log a ₹2,946 payment
+ * a figure: "A/c XX1234 paid to PRIYA SHARMA" would log a ₹1,234 payment
  * that never happened. A fabricated row is far worse than a miss — a miss gets
  * noticed, an invented payment gets believed. Requiring a non-alphanumeric
  * character before the digits rules that out while still accepting "Rs.20.00",
@@ -66,36 +66,36 @@ interface Pattern {
 }
 
 const PATTERNS: Pattern[] = [
-  // Kotak, and bank SMS generally — the couple's actual source:
-  // "Sent Rs.20.00 from XX2946 to GAYATHRI  UDAYAN on 07-Sep-26. UPI ref no..."
+  // Bank SMS — the format this was built against:
+  // "Sent Rs.20.00 from XX1234 to PRIYA  SHARMA on 07-Sep-26. UPI ref no..."
   {
     re: new RegExp(String.raw`\bsent\s+${CURRENCY}${AMOUNT}\b${GAP}to\s+(.+)`, 'i'),
     direction: 'sent',
     amountAt: 1,
     nameAt: 2,
   },
-  // "Rs.500.00 debited from A/c XX2946 to ADARSH ARAVIND"
+  // "Rs.500.00 debited from A/c XX1234 to RAHUL VERMA"
   {
     re: new RegExp(String.raw`${START}${CURRENCY}${AMOUNT}\s+debited\b${GAP}to\s+(.+)`, 'i'),
     direction: 'sent',
     amountAt: 1,
     nameAt: 2,
   },
-  // "You paid ₹500 to Gayathri Udhayan"  ·  "Paid ₹500 to Gayathri"
+  // "You paid ₹500 to Priya Sharma"  ·  "Paid ₹500 to Priya"
   {
     re: new RegExp(String.raw`(?:you\s+)?paid\s+${CURRENCY}${AMOUNT}\s+to\s+(.+)`, 'i'),
     direction: 'sent',
     amountAt: 1,
     nameAt: 2,
   },
-  // "₹500 sent to Gayathri Udhayan"  ·  "₹500 paid to Gayathri"
+  // "₹500 sent to Priya Sharma"  ·  "₹500 paid to Priya"
   {
     re: new RegExp(String.raw`${START}${CURRENCY}${AMOUNT}\s+(?:sent|paid)\s+to\s+(.+)`, 'i'),
     direction: 'sent',
     amountAt: 1,
     nameAt: 2,
   },
-  // "You sent ₹500 to Gayathri"  ·  "Payment of ₹500 to Gayathri successful"
+  // "You sent ₹500 to Priya"  ·  "Payment of ₹500 to Priya successful"
   {
     re: new RegExp(
       String.raw`(?:you\s+sent|payment\s+of|transferred)\s+${CURRENCY}${AMOUNT}\s+to\s+(.+)`,
@@ -105,14 +105,14 @@ const PATTERNS: Pattern[] = [
     amountAt: 1,
     nameAt: 2,
   },
-  // "Received Rs.500.00 in your Kotak Bank AC XX2946 from ADARSH ARAVIND on..."
+  // "Received Rs.500.00 in your Kotak Bank AC XX1234 from RAHUL VERMA on..."
   {
     re: new RegExp(String.raw`\breceived\s+${CURRENCY}${AMOUNT}\b${GAP}from\s+(.+)`, 'i'),
     direction: 'received',
     amountAt: 1,
     nameAt: 2,
   },
-  // "Rs.500.00 credited to your A/c XX2946 from ADARSH ARAVIND"
+  // "Rs.500.00 credited to your A/c XX1234 from RAHUL VERMA"
   {
     re: new RegExp(String.raw`${START}${CURRENCY}${AMOUNT}\s+credited\b${GAP}from\s+(.+)`, 'i'),
     direction: 'received',
@@ -126,7 +126,7 @@ const PATTERNS: Pattern[] = [
     amountAt: 1,
     nameAt: 2,
   },
-  // "Adarsh Aravind paid you ₹500"  ·  "Adarsh sent you ₹500"
+  // "Rahul Verma paid you ₹500"  ·  "Rahul sent you ₹500"
   {
     re: new RegExp(String.raw`(?:^|:\s*)(.+?)\s+(?:paid|sent)\s+you\s+${CURRENCY}${AMOUNT}`, 'i'),
     direction: 'received',
@@ -138,7 +138,7 @@ const PATTERNS: Pattern[] = [
 /**
  * Everything a bank or payment app likes to bolt onto the end of a name: the
  * date, the rail, the reference, the "Not you?" line. Cutting at the first of
- * these is what turns "GAYATHRI  UDAYAN on 07-Sep-26. UPI ref no. 661622805265"
+ * these is what turns "PRIYA  SHARMA on 07-Sep-26. UPI ref no. 123456789012"
  * back into a name.
  */
 const NAME_TAIL = /\s+(?:using|via|on|for|through|at|ref|utr|txn|—|-|\||·|,)\b.*$/i;
@@ -165,7 +165,7 @@ function normalize(value: string): string {
  *
  * Deliberately generous in one direction only. The name a payment app shows is
  * whatever the bank has on file, so it is routinely longer than the name in
- * the app's own profile ("Gayathri Udhayan" against "Gayathri") and sometimes
+ * the app's own profile ("Priya Sharma" against "Priya") and sometimes
  * an initial or a middle name apart. Matching on any shared token of three or
  * more characters bridges that; the three-character floor is what keeps
  * initials and honorifics from matching everyone.

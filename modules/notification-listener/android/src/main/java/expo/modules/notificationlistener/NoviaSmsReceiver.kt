@@ -9,9 +9,9 @@ import org.json.JSONObject
 /**
  * The primary source of detected payments: the bank's own SMS.
  *
- * Both partners bank with Kotak, and Kotak reports every UPI transfer by SMS
- * ("Sent Rs.20.00 from XX2946 to GAYATHRI UDAYAN on 07-Sep-26..."). That makes
- * SMS a better signal than the notification listener for this couple, in three
+ * Indian banks report every UPI transfer by SMS ("Sent Rs.20.00 from XX1234
+ * to PRIYA SHARMA on 07-Sep-26..." is the shape of it). That makes SMS a
+ * better signal than the notification listener, in three
  * ways: it fires whether or not the messaging app's notifications are enabled,
  * it hands over the whole body rather than whatever a collapsed notification
  * happened to show, and RECEIVE_SMS is an ordinary runtime permission with a

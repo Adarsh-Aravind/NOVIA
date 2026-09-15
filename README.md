@@ -51,8 +51,8 @@ The old finance module asked two people to bookkeep their own relationship, and
 they didn't. This one asks for nothing: it reads what the bank already tells
 them and shows it back.
 
-**Two sources, either one sufficient.** Both partners bank with Kotak, which
-texts every UPI transfer, so **SMS is the primary signal** — `RECEIVE_SMS` is an
+**Two sources, either one sufficient.** Indian banks text every UPI transfer,
+so **SMS is the primary signal** — `RECEIVE_SMS` is an
 ordinary runtime permission (one dialog), it fires whether or not the messaging
 app's notifications are on, and it delivers the whole message rather than
 whatever a collapsed notification happened to show. A `NotificationListenerService`
@@ -87,7 +87,7 @@ message itself never leaves the phone.
 device can be handed the same notification twice (a payment app updating it in
 place), which a `dedup_key` of source + amount + minute collapses. The harder
 case is that *both* phones witness one payment from opposite sides — his "Sent
-Rs.20 to GAYATHRI UDAYAN" and her "Received Rs.20 from ADARSH ARAVIND" are one
+Rs.20 to PRIYA SHARMA" and her "Received Rs.20 from RAHUL VERMA" are one
 event. That can't be solved by a shared key: the two texts land seconds apart,
 routinely straddle a minute boundary, and the phones' clocks need not agree. So
 `record_transaction()` does it server-side under a per-couple advisory lock,
@@ -105,7 +105,7 @@ surfaced anywhere, so the screen checks for a battery exemption and offers to
 request one.
 
 **Names are configurable.** A payment shows whatever name the bank holds —
-"GAYATHRI  UDAYAN" against a profile that says "Gayathri" — so matching accepts
+"PRIYA  SHARMA" against a profile that says "Priya" — so matching accepts
 any shared token of three or more characters, and the screen lets the user add
 the spellings their bank actually uses. The generosity runs one way only:
 missing a payment is recoverable, putting a stranger's transfer into a couple's

@@ -39,7 +39,7 @@
          *sender* to hold BROADCAST_SMS, and on this Samsung the effect was
          that nothing was delivered at all: the receiver was registered
          (confirmed in dumpsys), RECEIVE_SMS was granted, the app was not in
-         the stopped state, two Kotak messages arrived — and the capture queue
+         the stopped state, two bank messages arrived — and the capture queue
          stayed empty with nothing in logcat. It is a sender-side check we gain
          nothing from on a broadcast the system alone is allowed to send. -->
     <receiver
