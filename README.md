@@ -425,5 +425,3 @@ NOVIA is **fair source**, released under the [Functional Source License, Version
 - ⏳ **Every version becomes fully open source two years after it's released.** From that date it's also available under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0), with no competing-use restriction.
 
 **Commercial use.** Want to build a product on NOVIA, license it, or partner on it? Get in touch through [adarsharavind.com](https://www.adarsharavind.com) and we can agree separate terms.
-
-<3
