@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 import { Backdrop } from './Backdrop';
@@ -90,18 +90,30 @@ export function Button({
 
 /** Segmented control, used for the sections of a page. */
 export function Segments<T extends string>({ value, options, onChange }: { value: T; options: { key: T; label: string }[]; onChange: (v: T) => void }) {
-  return (
-    <View style={styles.segments}>
-      {options.map((o) => {
-        const on = o.key === value;
-        return (
-          <Press key={o.key} depth={0.94} onPress={() => onChange(o.key)} style={[styles.seg, on && styles.segOn]} accessibilityRole="tab" accessibilityState={{ selected: on }}>
-            <Text style={[styles.segText, on && styles.segTextOn]}>{o.label}</Text>
-          </Press>
-        );
-      })}
-    </View>
-  );
+  const pills = options.map((o) => {
+    const on = o.key === value;
+    return (
+      <Press
+        key={o.key}
+        depth={0.94}
+        onPress={() => onChange(o.key)}
+        style={[styles.seg, options.length > 4 && styles.segScroll, on && styles.segOn]}
+        accessibilityRole="tab"
+        accessibilityState={{ selected: on }}
+      >
+        <Text style={[styles.segText, on && styles.segTextOn]}>{o.label}</Text>
+      </Press>
+    );
+  });
+  // More than four don't fit across a phone, so they scroll sideways.
+  if (options.length > 4) {
+    return (
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.segments} style={styles.segmentsScroll}>
+        {pills}
+      </ScrollView>
+    );
+  }
+  return <View style={styles.segments}>{pills}</View>;
 }
 
 export function Empty({ title, body }: { title: string; body: string }) {
@@ -153,6 +165,8 @@ const styles = StyleSheet.create({
   segments: { flexDirection: 'row', padding: 4, borderRadius: R.pill, backgroundColor: 'rgba(255,255,255,0.05)', gap: 4 },
   seg: { flex: 1, height: 38, borderRadius: R.pill, alignItems: 'center', justifyContent: 'center' },
   segOn: { backgroundColor: 'rgba(255,255,255,0.12)' },
+  segScroll: { flex: 0, paddingHorizontal: 16 },
+  segmentsScroll: { flexGrow: 0, borderRadius: R.pill },
   segText: { fontFamily: F.semibold, fontSize: 13.5, color: C.inkSoft },
   segTextOn: { color: C.ink },
   empty: { paddingVertical: 28, alignItems: 'center', gap: 6 },

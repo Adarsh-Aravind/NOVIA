@@ -57,5 +57,11 @@ export function useBucket(coupleId: string | null, userId: string | null) {
     load();
   };
 
-  return { items, add, toggle };
+  const remove = async (id: string) => {
+    setItems((prev) => prev.filter((i) => i.id !== id));
+    await supabase.from('bucket_list').delete().eq('id', id);
+    load();
+  };
+
+  return { items, add, toggle, remove };
 }

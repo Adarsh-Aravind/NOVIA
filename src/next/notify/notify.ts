@@ -21,17 +21,22 @@ export const CH = {
   partner: 'next-partner',
   dates: 'next-dates',
   care: 'next-care',
+  word: 'next-word',
+  news: 'next-news',
 } as const;
 export type Channel = (typeof CH)[keyof typeof CH];
 
 const KEY = 'novia-next:reminders';
 
-/** Whether NOVIA Next schedules reminders. Off by default while the old app is installed too. */
+/**
+ * Whether NOVIA schedules reminders. On unless switched off: this app has
+ * replaced the old one, so nothing else is scheduling them.
+ */
 export async function remindersEnabled(): Promise<boolean> {
   try {
-    return (await AsyncStorage.getItem(KEY)) === 'on';
+    return (await AsyncStorage.getItem(KEY)) !== 'off';
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -84,7 +89,20 @@ export async function configureNext(): Promise<boolean> {
         importance: Notifications.AndroidImportance.DEFAULT,
         showBadge: false,
       }),
+      Notifications.setNotificationChannelAsync(CH.word, {
+        name: 'Word of the day',
+        description: 'A new word each morning.',
+        importance: Notifications.AndroidImportance.LOW,
+        showBadge: false,
+      }),
+      Notifications.setNotificationChannelAsync(CH.news, {
+        name: 'What’s new',
+        description: 'When NOVIA gets an update.',
+        importance: Notifications.AndroidImportance.LOW,
+        showBadge: false,
+      }),
     ]);
+    await retireOldApp();
   }
   const { status } = await Notifications.getPermissionsAsync();
   if (status === 'granted') return true;
@@ -130,4 +148,28 @@ export async function cancelNext(prefix: string) {
       })
       .map((n) => Notifications.cancelScheduledNotificationAsync(n.identifier))
   );
+}
+
+/**
+ * This app installs over the old NOVIA, which left reminders scheduled on its
+ * own loud channels. Cancel those and remove the old channels, once, so
+ * nothing fires twice or buzzes the old way after the upgrade.
+ */
+async function retireOldApp() {
+  try {
+    if ((await AsyncStorage.getItem('novia-next:retired-old')) === 'yes') return;
+    const all = await Notifications.getAllScheduledNotificationsAsync();
+    await Promise.all(
+      all
+        .filter((n) => {
+          const k = n.content.data?.reminderKey;
+          return !(typeof k === 'string' && k.startsWith('next:'));
+        })
+        .map((n) => Notifications.cancelScheduledNotificationAsync(n.identifier))
+    );
+    await Promise.all(['priority-channel', 'reminders-channel'].map((id) => Notifications.deleteNotificationChannelAsync(id).catch(() => undefined)));
+    await AsyncStorage.setItem('novia-next:retired-old', 'yes');
+  } catch {
+    // Try again next launch.
+  }
 }

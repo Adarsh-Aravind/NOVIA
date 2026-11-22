@@ -5,9 +5,9 @@
     "version": "2.1.0",
     "orientation": "portrait",
     "icon": "./assets/novia-icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
-    "runtimeVersion": "3",
+    "runtimeVersion": "4",
     "updates": {
       "url": "https://u.expo.dev/928a233f-606a-412b-9b2a-6c9e57eba586",
       "checkAutomatically": "ON_LOAD",

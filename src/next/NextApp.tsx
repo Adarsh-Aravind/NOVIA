@@ -25,13 +25,16 @@ import { Reminders } from './notify/Reminders';
 import { configureNext } from './notify/notify';
 import { useStreak } from './hooks/useStreak';
 import { TogetherProvider } from './hooks/useTogether';
+import { MoneyProvider } from './hooks/useMoney';
+import { checkAndApplyUpdate } from '../services/updates';
 
 /**
- * NOVIA Next. The redesign, booted by EXPO_PUBLIC_NEXT=1 (see index.ts).
+ * NOVIA. The app's root: fonts, gesture handling, sign-in, pairing, and the
+ * four places (Sky, Us, Care, You) in a floating dock.
  *
- * It reuses the current app's data hooks and backend unchanged and replaces
- * only what you see: a sky instead of a dashboard, four places instead of five
- * tabs and a side menu.
+ * Over-the-air updates are checked on launch and applied straight away, as
+ * the original app did (services/updates.ts); a JS-only change ships without
+ * a reinstall.
  */
 export default function NextApp() {
   const [fontsLoaded] = useFonts({
@@ -70,6 +73,11 @@ function Root() {
     if (auth.session) configureNext().catch(() => undefined);
   }, [auth.session]);
 
+  // Pick up any over-the-air update on launch.
+  useEffect(() => {
+    checkAndApplyUpdate().catch(() => undefined);
+  }, []);
+
   if (resetting !== null) {
     return <ResetScreen initialEmail={resetting} onDone={() => setResetting(null)} onCancel={() => setResetting(null)} />;
   }
@@ -84,6 +92,7 @@ function Root() {
 
   return (
     <TogetherProvider coupleId={auth.coupleId} userId={auth.profile.id} partnerName={auth.partnerProfile?.display_name || 'Your partner'}>
+    <MoneyProvider coupleId={auth.coupleId} partnerName={auth.partnerProfile?.display_name ?? null}>
     <View style={styles.root}>
       <Reminders
         coupleId={auth.coupleId}
@@ -99,10 +108,20 @@ function Root() {
         {tab === 'sky' && <SkyScreen {...common} streak={streak} />}
         {tab === 'us' && <UsScreen {...common} />}
         {tab === 'care' && <CareScreen {...common} />}
-        {tab === 'you' && <YouScreen {...common} signOut={auth.signOut} onRemindersChanged={() => setReminderVersion((v) => v + 1)} />}
+        {tab === 'you' && (
+          <YouScreen
+            {...common}
+            signOut={auth.signOut}
+            onRemindersChanged={() => setReminderVersion((v) => v + 1)}
+            updateDisplayName={auth.updateDisplayName}
+            updateAvatar={auth.updateAvatar}
+            unpairPartner={auth.unpairPartner}
+          />
+        )}
       </Animated.View>
       <Dock tab={tab} onChange={setTab} bottom={insets.bottom} />
     </View>
+    </MoneyProvider>
     </TogetherProvider>
   );
 }

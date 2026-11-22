@@ -8,6 +8,10 @@ import { useComplaints } from '../../hooks/useComplaints';
 import { elapsedAt, formatElapsed, nextOccurrence } from '../../utils/milestoneMath';
 import { withLock } from '../../utils/asyncLock';
 import { CH, cancelNext, configureNext, notify, remindersEnabled } from './notify';
+import { getWordOfDay } from '../../constants/vocabulary';
+import { toLocalISODate } from '../../utils/dateUtils';
+import { fetchAppUpdates, getLastSeenUpdateAt, unseenUpdates } from '../../services/updates';
+import { claimNotification } from '../../services/notifyOnce';
 
 const T = Notifications.SchedulableTriggerInputTypes;
 
@@ -152,6 +156,36 @@ export function Reminders({ coupleId, me, partnerName, version }: { coupleId: st
       });
     });
   }, [on, predictions]);
+
+  // Word of the day: the next 14 mornings, topped up whenever this re-runs.
+  useEffect(() => {
+    if (!on) return;
+    withLock('next-word', async () => {
+      await cancelNext('word:');
+      const now = new Date();
+      const jobs: Promise<unknown>[] = [];
+      for (let i = 0; i < 14; i++) {
+        const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i, 9, 0, 0, 0);
+        if (day.getTime() <= Date.now()) continue;
+        const w = getWordOfDay(day);
+        jobs.push(notify({ channel: CH.word, title: w.word, body: w.meaning, trigger: day, key: `word:${toLocalISODate(day)}` }));
+      }
+      await Promise.all(jobs);
+    });
+  }, [on, version]);
+
+  // A new release note: say so once per phone.
+  useEffect(() => {
+    if (!on) return;
+    (async () => {
+      const all = await fetchAppUpdates().catch(() => []);
+      const fresh = unseenUpdates(all, await getLastSeenUpdateAt());
+      const newest = fresh[0];
+      if (newest && (await claimNotification(`next-update:${newest.id}`))) {
+        notify({ channel: CH.news, title: `What’s new in NOVIA ${newest.version}`, body: newest.title, trigger: null, key: `news:${newest.id}` });
+      }
+    })().catch(() => undefined);
+  }, [on]);
 
   // A repair your partner starts, while the app is in the background.
   const seen = useRef<Set<string> | null>(null);

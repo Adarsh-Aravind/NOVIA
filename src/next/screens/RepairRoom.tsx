@@ -52,7 +52,7 @@ function coolUntil(mins: number): string | null {
 }
 
 export function RepairRoom({ coupleId, me, partnerName }: { coupleId: string; me: string; partnerName: string }) {
-  const { complaints, repliesFor, addReply } = useComplaints(coupleId, me);
+  const { complaints, repliesFor, addReply, deleteComplaint } = useComplaints(coupleId, me);
   const [composing, setComposing] = useState(false);
   const repairs = complaints as Repair[];
   const open = repairs.filter((r) => r.status !== 'resolved');
@@ -74,7 +74,7 @@ export function RepairRoom({ coupleId, me, partnerName }: { coupleId: string; me
       )}
 
       {open.map((r) => (
-        <RepairCard key={r.id} repair={r} me={me} partnerName={partnerName} replies={repliesFor(r.id)} addReply={addReply} />
+        <RepairCard key={r.id} repair={r} me={me} partnerName={partnerName} replies={repliesFor(r.id)} addReply={addReply} onDelete={() => deleteComplaint(r.id)} />
       ))}
 
       {done.length > 0 && (
@@ -186,14 +186,17 @@ function RepairCard({
   partnerName,
   replies,
   addReply,
+  onDelete,
 }: {
   repair: Repair;
+  onDelete: () => void;
   me: string;
   partnerName: string;
   replies: { id: string; author_id: string; body: string; created_at: string }[];
   addReply: (id: string, body: string) => Promise<unknown>;
 }) {
   const [openThread, setOpenThread] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [reply, setReply] = useState('');
   const [now, setNow] = useState(Date.now());
   const mine = repair.created_by === me;
@@ -272,6 +275,17 @@ function RepairCard({
         </View>
       )}
 
+      {mine &&
+        (confirmDelete ? (
+          <View style={styles.delRow}>
+            <Text style={[ui.soft, { flex: 1 }]}>Delete this repair for both of you?</Text>
+            <Text style={styles.delYes} onPress={onDelete}>Delete</Text>
+            <Text style={styles.delNo} onPress={() => setConfirmDelete(false)}>Keep</Text>
+          </View>
+        ) : (
+          <Text style={styles.delLink} onPress={() => setConfirmDelete(true)}>Delete</Text>
+        ))}
+
       <View style={styles.confirmRow}>
         <View style={styles.confirmDots}>
           <View style={[styles.confirmDot, { borderColor: C.me }, iConfirmed && { backgroundColor: C.me }]} />
@@ -337,6 +351,10 @@ const styles = StyleSheet.create({
   good: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, height: 36, borderRadius: R.pill, borderWidth: 1, borderColor: C.lineStrong },
   goodOn: { backgroundColor: C.star, borderColor: C.star },
   goodText: { fontFamily: F.bold, fontSize: 13, color: C.ink },
+  delRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  delYes: { fontFamily: F.bold, fontSize: 13, color: C.danger },
+  delNo: { fontFamily: F.semibold, fontSize: 13, color: C.ink },
+  delLink: { alignSelf: 'flex-end', fontFamily: F.semibold, fontSize: 12.5, color: C.inkFaint },
   doneRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   doneStar: { width: 10, height: 10, borderRadius: 5, backgroundColor: C.star },
 });

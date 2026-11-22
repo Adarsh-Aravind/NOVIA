@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { Page, Card, Label, Empty, ui } from '../components/ui';
 import { WalkTogether } from '../walk/WalkTogether';
 import { WeatherOfUs } from '../weather/WeatherOfUs';
+import { CycleLog, HospitalVisits, Stakes } from './CareParts';
 import { usePeriods } from '../../hooks/usePeriods';
 import { parseLocalDate } from '../../utils/dateUtils';
 import { useSteps } from '../../hooks/useSteps';
@@ -26,7 +27,7 @@ const PHASE_CARE: Record<string, string> = {
 
 /** Looking after each other: the cycle, read as care, and the week's walking. */
 export function CareScreen({ profile, partner, coupleId, bottomInset }: Props) {
-  const { predictions } = usePeriods(coupleId);
+  const { predictions, records, addPeriodLog, refreshPeriods } = usePeriods(coupleId);
   const steps = useSteps(coupleId, profile.id, partner?.id);
   const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 
@@ -51,9 +52,12 @@ export function CareScreen({ profile, partner, coupleId, bottomInset }: Props) {
             </View>
           </>
         ) : (
-          <Empty title="No cycle logged" body="Logging is in the current NOVIA app for now. It moves here in the next pass." />
+          <Empty title="No cycle logged yet" body="Log a period and NOVIA predicts the next one, the fertile window and the phase you're in." />
         )}
+        <CycleLog records={records} addPeriodLog={addPeriodLog} refresh={refreshPeriods} />
       </Card>
+
+      <HospitalVisits profile={profile} partner={partner} />
 
       <Card>
         <Label>This week’s walking</Label>
@@ -80,9 +84,9 @@ export function CareScreen({ profile, partner, coupleId, bottomInset }: Props) {
         {steps.status === 'ready' && (
           <Text style={ui.soft}>
             Season {steps.season.label}: you {steps.season.myWins}, {partner?.display_name || 'partner'} {steps.season.partnerWins}
-            {steps.forfeit ? ` · Loser: ${steps.forfeit}` : ''}
           </Text>
         )}
+        <Stakes forfeit={steps.forfeit} setForfeit={steps.setForfeit} />
       </Card>
     </Page>
   );

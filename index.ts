@@ -1,15 +1,15 @@
 import 'react-native-gesture-handler';
 import { registerRootComponent } from 'expo';
 
-// EXPO_PUBLIC_NEXT=1 boots the redesign (src/next) instead of the current app.
-// The flag is inlined at bundle time, so each build carries only one root.
-const Root =
-  process.env.EXPO_PUBLIC_NEXT === '1'
-    ? require('./src/next/NextApp').default
-    : require('./App').default;
+// NOVIA is the app in src/next. The original single-file app (App.tsx) is
+// kept only for the no-backend demo build (EXPO_PUBLIC_DEMO_MODE=1), whose
+// in-memory backend was written against it. The flag is inlined at bundle
+// time, so each build carries only one root.
+const DEMO = process.env.EXPO_PUBLIC_DEMO_MODE === '1';
+const Root = DEMO ? require('./App').default : require('./src/next/NextApp').default;
 
-// NOVIA Next's home- and lock-screen widgets draw from a headless task.
-if (process.env.EXPO_PUBLIC_NEXT === '1') {
+// The home- and lock-screen widgets draw from a headless task.
+if (!DEMO) {
   try {
     const { registerWidgetTaskHandler } = require('react-native-android-widget');
     registerWidgetTaskHandler(require('./src/next/widgets/handler').widgetTaskHandler);
