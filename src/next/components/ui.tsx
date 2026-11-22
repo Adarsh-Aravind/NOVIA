@@ -1,10 +1,11 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
+import { StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import Svg, { Defs, LinearGradient as SvgGradient, Rect, Stop } from 'react-native-svg';
 import { Backdrop } from './Backdrop';
+import { Press } from './Press';
 import { C, F, R } from '../theme';
 
 /** A scrolling page with a big title, clear of the status bar and the dock. */
@@ -101,19 +102,15 @@ export function Button({
   disabled?: boolean;
 }) {
   return (
-    <Pressable
+    <Press
       onPress={onPress}
       disabled={disabled}
       accessibilityRole="button"
-      style={({ pressed }) => [
-        styles.btn,
-        kind === 'ghost' && styles.btnGhost,
-        kind === 'danger' && styles.btnDanger,
-        (pressed || disabled) && { opacity: 0.6 },
-      ]}
+      accessibilityState={{ disabled: !!disabled }}
+      style={[styles.btn, kind === 'ghost' && styles.btnGhost, kind === 'danger' && styles.btnDanger, disabled && { opacity: 0.5 }]}
     >
       <Text style={[styles.btnText, kind !== 'solid' && { color: kind === 'danger' ? C.danger : C.ink }]}>{title}</Text>
-    </Pressable>
+    </Press>
   );
 }
 
@@ -124,9 +121,9 @@ export function Segments<T extends string>({ value, options, onChange }: { value
       {options.map((o) => {
         const on = o.key === value;
         return (
-          <Pressable key={o.key} onPress={() => onChange(o.key)} style={[styles.seg, on && styles.segOn]} accessibilityRole="tab" accessibilityState={{ selected: on }}>
+          <Press key={o.key} depth={0.94} onPress={() => onChange(o.key)} style={[styles.seg, on && styles.segOn]} accessibilityRole="tab" accessibilityState={{ selected: on }}>
             <Text style={[styles.segText, on && styles.segTextOn]}>{o.label}</Text>
-          </Pressable>
+          </Press>
         );
       })}
     </View>

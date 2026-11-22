@@ -7,7 +7,10 @@ import Animated, {
   useSharedValue,
   withSpring,
   withTiming,
+  cancelAnimation,
+  runOnJS,
 } from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useClock } from '@shopify/react-native-skia';
 import * as Haptics from 'expo-haptics';
@@ -25,6 +28,13 @@ import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { daysUntilNext, occursOn, elapsedAt, formatElapsed } from '../../utils/milestoneMath';
 import type { Profile } from '../../types';
 import { C, F, R, MOODS, moodAdvice, moodLight, skyAt } from '../theme';
+import { SPRING, project, soften } from '../motion';
+import { Press } from '../components/Press';
+import { parseLocalDate } from '../../utils/dateUtils';
+
+// Large, unprompted moves (the lights drifting apart or meeting): no bounce,
+// a little slower than a tap-driven snap so the eye can follow them.
+const CALM = { mass: 1, stiffness: 110, damping: 21 };
 import { saveWidgetState } from '../widgets/state';
 
 interface Props {
@@ -121,12 +131,14 @@ export function SkyScreen({ profile, partner, coupleId, bottomInset, streak }: P
   // when your partner hasn't got the app open, one light when you both hold.
   useEffect(() => {
     const target = merged ? 0 : together.partnerHere ? 0.82 : 1.12;
-    sep.value = reduced ? target : withSpring(target, { damping: 14, stiffness: 60 });
-    merge.value = withTiming(merged ? 1 : 0, { duration: reduced ? 0 : 900 });
+    // Nobody threw these, so no bounce: critically damped, re-targeting from
+    // wherever the lights are if presence changes again mid-move.
+    sep.value = reduced ? target : withSpring(target, CALM);
+    merge.value = reduced ? (merged ? 1 : 0) : withSpring(merged ? 1 : 0, CALM);
   }, [merged, together.partnerHere, reduced, sep, merge]);
 
   useEffect(() => {
-    partnerHold.value = withTiming(together.partnerHolding ? 1 : 0, { duration: 500 });
+    partnerHold.value = withSpring(together.partnerHolding ? 1 : 0, SPRING.move);
   }, [together.partnerHolding, partnerHold]);
 
   // The heartbeat: both phones beat together for as long as you both hold.
@@ -178,17 +190,79 @@ export function SkyScreen({ profile, partner, coupleId, bottomInset, streak }: P
     );
   };
 
+  // The hold answers the instant a finger lands: the light starts swelling
+  // under it straight away and keeps filling until the hold commits, so the
+  // 220 ms before a long-press is recognised is felt as the light gathering
+  // itself, not as lag. Lift early and it simply settles back, from wherever
+  // it had got to.
+  const pressLight = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    meHold.value = withTiming(0.45, { duration: 220 });
+  };
   const startHold = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     together.setHolding(true);
-    meHold.value = withTiming(1, { duration: 400 });
+    meHold.value = withSpring(1, SPRING.snap);
   };
   const endHold = () => {
     // Always release: setHolding ignores it if nothing is held, and a check
     // against `together.holding` here could read a stale value.
     together.setHolding(false);
-    meHold.value = withTiming(0, { duration: 400 });
+    meHold.value = withSpring(0, SPRING.move);
   };
+
+  // The panel. Collapsed, the extra section hangs below the clip edge; pulled
+  // up, the whole panel rises to show it. It tracks the finger 1:1 from where
+  // it was grabbed, rubber-bands past either end, and on release is thrown to
+  // whichever end its momentum projects it nearest, carrying the finger's
+  // velocity into the spring so there's no seam between drag and settle.
+  const [extra, setExtra] = useState(0);
+  const [expanded, setExpanded] = useState(false);
+  const panelY = useSharedValue(0);
+  const extraH = useSharedValue(0);
+  const dragStart = useSharedValue(0);
+  const placedPanel = useRef(false);
+  useEffect(() => {
+    if (!extra) return;
+    extraH.value = extra;
+    if (!placedPanel.current) {
+      placedPanel.current = true;
+      panelY.value = extra; // start collapsed, no animation
+    } else if (!expanded) {
+      panelY.value = withSpring(extra, SPRING.sheet);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extra]);
+
+  const settle = (open: boolean, velocity = 0) => {
+    'worklet';
+    panelY.value = withSpring(open ? 0 : extraH.value, { ...SPRING.sheet, velocity });
+    runOnJS(setExpanded)(open);
+  };
+  const togglePanel = () => {
+    Haptics.selectionAsync();
+    const open = !expanded;
+    panelY.value = withSpring(open ? 0 : extraH.value, SPRING.sheet);
+    setExpanded(open);
+  };
+  const panelPan = Gesture.Pan()
+    .activeOffsetY([-8, 8])
+    .failOffsetX([-16, 16])
+    .onStart(() => {
+      cancelAnimation(panelY);
+      dragStart.value = panelY.value;
+    })
+    .onUpdate((e) => {
+      panelY.value = soften(dragStart.value + e.translationY, 0, extraH.value, 260);
+    })
+    .onEnd((e) => {
+      const landing = panelY.value + project(e.velocityY);
+      settle(landing < extraH.value / 2, e.velocityY);
+    });
+  const panelStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: panelY.value }],
+    opacity: extraH.value > 0 ? 1 : 0,
+  }));
 
   // Touch targets ride on the lights.
   const meStyle = useAnimatedStyle(() => {
@@ -319,6 +393,7 @@ export function SkyScreen({ profile, partner, coupleId, bottomInset, streak }: P
         <Pressable
           style={styles.fill}
           delayLongPress={220}
+          onPressIn={pressLight}
           onLongPress={startHold}
           onPressOut={endHold}
           onPress={() => showToast(`Press and hold your light. If ${partnerName} holds theirs too, they meet.`)}
@@ -363,54 +438,101 @@ export function SkyScreen({ profile, partner, coupleId, bottomInset, streak }: P
         </Animated.View>
       )}
 
-      {/* Sheet: their weather, your light, the duel */}
-      <View style={[styles.sheet, { bottom: sheetBottom }]}>
-        <View style={styles.row}>
-          <View style={[styles.dot, { backgroundColor: C.partner }]} />
-          <Text style={styles.sheetTitle} numberOfLines={1}>
-            {partnerName} · {partnerMood === 'Neutral' ? 'Steady' : partnerMood}
-          </Text>
-        </View>
-        <Text style={styles.advice}>{moodAdvice(partnerMood, partnerName)}</Text>
-
-        <Text style={styles.label}>Your light</Text>
-        <View style={styles.moods}>
-          {MOODS.map((m) => {
-            const on = currentMood === m;
-            return (
-              <Pressable
-                key={m}
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  updateMood(on ? 'Neutral' : m);
-                }}
-                style={[styles.mood, on && styles.moodOn]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: on }}
-              >
-                <Text style={[styles.moodText, on && styles.moodTextOn]}>{m}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <Pressable
-          style={styles.steps}
-          onPress={() => (steps.status === 'ready' ? steps.refresh() : steps.requestAccess())}
-          accessibilityRole="button"
-        >
-          <Footprints size={16} color={C.inkSoft} />
-          {steps.status === 'ready' ? (
-            <View style={styles.duel}>
-              <StepBar value={steps.mySteps} other={steps.partnerSteps} colour={C.me} name={myName} />
-              <StepBar value={steps.partnerSteps} other={steps.mySteps} colour={C.partner} name={partnerName} />
+      {/* The panel: their weather, your light, the duel. Pull it up for more. */}
+      <View style={[styles.panelClip, { bottom: sheetBottom }]} pointerEvents="box-none">
+        <GestureDetector gesture={panelPan}>
+          <Animated.View style={[styles.sheet, panelStyle]}>
+            <Press onPress={togglePanel} haptic={false} depth={0.9} style={styles.grabberHit} accessibilityRole="button" accessibilityLabel={expanded ? 'Show less' : 'Show more'}>
+              <View style={styles.grabber} />
+            </Press>
+            <View style={styles.row}>
+              <View style={[styles.dot, { backgroundColor: C.partner }]} />
+              <Text style={styles.sheetTitle} numberOfLines={1}>
+                {partnerName} · {partnerMood === 'Neutral' ? 'Steady' : partnerMood}
+              </Text>
             </View>
-          ) : (
-            <Text style={styles.stepsCta}>
-              {steps.status === 'unavailable' ? 'Steps need Health Connect' : 'Connect steps to start today’s walk-off'}
-            </Text>
-          )}
-        </Pressable>
+            <Text style={styles.advice}>{moodAdvice(partnerMood, partnerName)}</Text>
+
+            <Text style={styles.label}>Your light</Text>
+            <View style={styles.moods}>
+              {MOODS.map((m) => {
+                const on = currentMood === m;
+                return (
+                  <Press
+                    key={m}
+                    onPress={() => updateMood(on ? 'Neutral' : m)}
+                    style={[styles.mood, on && styles.moodOn]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: on }}
+                  >
+                    <Text style={[styles.moodText, on && styles.moodTextOn]}>{m}</Text>
+                  </Press>
+                );
+              })}
+            </View>
+
+            <Press
+              depth={0.98}
+              style={styles.steps}
+              onPress={() => (steps.status === 'ready' ? steps.refresh() : steps.requestAccess())}
+              accessibilityRole="button"
+            >
+              <Footprints size={16} color={C.inkSoft} />
+              {steps.status === 'ready' ? (
+                <View style={styles.duel}>
+                  <StepBar value={steps.mySteps} other={steps.partnerSteps} colour={C.me} name={myName} />
+                  <StepBar value={steps.partnerSteps} other={steps.mySteps} colour={C.partner} name={partnerName} />
+                </View>
+              ) : (
+                <Text style={styles.stepsCta}>
+                  {steps.status === 'unavailable' ? 'Steps need Health Connect' : 'Connect steps to start today’s walk-off'}
+                </Text>
+              )}
+            </Press>
+
+            {/* Revealed by pulling the panel up. */}
+            <View onLayout={(e) => setExtra(e.nativeEvent.layout.height + 8)} style={styles.extra}>
+              {steps.status === 'ready' && steps.series.length > 0 && (
+                <>
+                  <Text style={styles.label}>This week</Text>
+                  <View style={styles.week}>
+                    {steps.series.map((d) => {
+                      const max = Math.max(...steps.series.flatMap((x) => [x.me ?? 0, x.partner ?? 0]), 1);
+                      return (
+                        <View key={d.date} style={styles.weekDay}>
+                          <View style={styles.weekBars}>
+                            <View style={[styles.weekBar, { height: `${((d.me ?? 0) / max) * 100}%`, backgroundColor: C.me }]} />
+                            <View style={[styles.weekBar, { height: `${((d.partner ?? 0) / max) * 100}%`, backgroundColor: C.partner }]} />
+                          </View>
+                          <Text style={[styles.weekLabel, d.isToday && { color: C.ink }]}>
+                            {parseLocalDate(d.date).toLocaleDateString('en-GB', { weekday: 'narrow' })}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </>
+              )}
+              <Text style={styles.extraLine}>
+                {streak.days > 0
+                  ? `Together ${streak.days} ${streak.days === 1 ? 'day' : 'days'} in a row${streak.best > streak.days ? ` · best ${streak.best}` : ''}`
+                  : 'Open NOVIA every day, both of you, to start a streak'}
+              </Text>
+              <View style={styles.actions}>
+                <Press onPress={nudge} style={[styles.action, { borderColor: C.partner }]} accessibilityRole="button">
+                  <Text style={styles.actionText}>Nudge {partnerName}</Text>
+                </Press>
+                <Press
+                  onPress={() => showToast(`Press and hold your light. If ${partnerName} holds theirs at the same time, they meet.`)}
+                  style={[styles.action, { borderColor: C.me }]}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.actionText}>How holding works</Text>
+                </Press>
+              </View>
+            </View>
+          </Animated.View>
+        </GestureDetector>
       </View>
 
       {toast && (
@@ -478,11 +600,14 @@ const styles = StyleSheet.create({
   tipKind: { fontFamily: F.bold, fontSize: 11, letterSpacing: 0.8, textTransform: 'uppercase' },
   tipText: { fontFamily: F.medium, fontSize: 14, color: C.ink },
   tipDate: { fontFamily: F.body, fontSize: 12, color: C.inkSoft },
+  panelClip: { position: 'absolute', top: 0, left: 0, right: 0, overflow: 'hidden' },
   sheet: {
     position: 'absolute',
+    bottom: 0,
     left: 12,
     right: 12,
     padding: 18,
+    paddingTop: 8,
     borderRadius: R.lg,
     backgroundColor: C.glass,
     borderWidth: StyleSheet.hairlineWidth,
@@ -490,6 +615,18 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  grabberHit: { alignSelf: 'center', paddingHorizontal: 30, paddingVertical: 6 },
+  grabber: { width: 38, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.3)' },
+  extra: { gap: 10, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.line },
+  week: { flexDirection: 'row', gap: 6, height: 64, alignItems: 'flex-end' },
+  weekDay: { flex: 1, alignItems: 'center', gap: 4, height: '100%' },
+  weekBars: { flex: 1, width: '100%', flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'center', gap: 2 },
+  weekBar: { width: 6, borderRadius: 3, minHeight: 3 },
+  weekLabel: { fontFamily: F.semibold, fontSize: 10, color: C.inkFaint },
+  extraLine: { fontFamily: F.medium, fontSize: 13.5, color: C.ink },
+  actions: { flexDirection: 'row', gap: 8 },
+  action: { flex: 1, height: 42, borderRadius: R.pill, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  actionText: { fontFamily: F.semibold, fontSize: 13, color: C.ink },
   dot: { width: 8, height: 8, borderRadius: 4 },
   sheetTitle: { flex: 1, fontFamily: F.display, fontSize: 19, color: C.ink, letterSpacing: -0.3 },
   advice: { fontFamily: F.body, fontSize: 14, lineHeight: 20, color: C.inkSoft },

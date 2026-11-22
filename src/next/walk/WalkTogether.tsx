@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Press } from '../components/Press';
 import * as Haptics from 'expo-haptics';
 import { MapPin, Flag } from 'lucide-react-native';
 
@@ -102,14 +103,14 @@ function PlaceField({ label, value, onPick, icon }: { label: string; value: Plac
 
   if (value) {
     return (
-      <Pressable onPress={() => onPick(null)} style={styles.picked} accessibilityRole="button" accessibilityHint="Tap to change">
+      <Press onPress={() => onPick(null)} style={styles.picked} accessibilityRole="button" accessibilityHint="Tap to change">
         {icon}
         <View style={{ flex: 1 }}>
           <Text style={ui.body}>{value.name}</Text>
           <Text style={ui.soft}>{value.country}</Text>
         </View>
         <Text style={styles.change}>Change</Text>
-      </Pressable>
+      </Press>
     );
   }
   return (
@@ -117,10 +118,9 @@ function PlaceField({ label, value, onPick, icon }: { label: string; value: Plac
       <Field placeholder={label} value={q} onChangeText={setQ} autoCorrect={false} />
       {searching && <Text style={ui.soft}>Searching…</Text>}
       {results.map((p) => (
-        <Pressable
+        <Press
           key={`${p.name}-${p.lat}-${p.lng}`}
           onPress={() => {
-            Haptics.selectionAsync();
             onPick(p);
             setQ('');
           }}
@@ -128,7 +128,7 @@ function PlaceField({ label, value, onPick, icon }: { label: string; value: Plac
         >
           <Text style={ui.body}>{p.name}</Text>
           <Text style={ui.soft}>{p.country}</Text>
-        </Pressable>
+        </Press>
       ))}
     </View>
   );
@@ -153,9 +153,9 @@ function Plan({ avgDaily, onStart, onCancel }: { avgDaily: number; onStart: (a: 
       <Label>How long should it take?</Label>
       <View style={styles.paces}>
         {PACES.map((p, i) => (
-          <Pressable key={p.key} onPress={() => setPace(i)} style={[styles.pace, pace === i && styles.paceOn]} accessibilityRole="button" accessibilityState={{ selected: pace === i }}>
+          <Press key={p.key} onPress={() => setPace(i)} style={[styles.pace, pace === i && styles.paceOn]} accessibilityRole="button" accessibilityState={{ selected: pace === i }}>
             <Text style={[styles.paceText, pace === i && { color: C.ink }]}>{p.label}</Text>
-          </Pressable>
+          </Press>
         ))}
       </View>
       <Text style={ui.soft}>

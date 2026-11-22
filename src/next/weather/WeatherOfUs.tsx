@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Press } from '../components/Press';
 import { ChevronLeft, ChevronRight, Sun, CloudSun, Cloud, CloudDrizzle, CloudRain, CloudLightning, Moon } from 'lucide-react-native';
 import { Card, Label, ui } from '../components/ui';
 import { supabase } from '../../services/supabase';
@@ -129,12 +130,12 @@ export function WeatherOfUs({ coupleId, me, partnerName }: { coupleId: string; m
       <View style={ui.row}>
         <Label>Weather of us</Label>
         <View style={{ flex: 1 }} />
-        <Pressable onPress={() => setPage(page + 1)} disabled={!canGoBack} hitSlop={10} accessibilityLabel="Earlier" style={{ opacity: canGoBack ? 1 : 0.3 }}>
+        <Press onPress={() => setPage(page + 1)} disabled={!canGoBack} hitSlop={10} accessibilityLabel="Earlier" style={{ opacity: canGoBack ? 1 : 0.3 }}>
           <ChevronLeft size={20} color={C.ink} />
-        </Pressable>
-        <Pressable onPress={() => setPage(Math.max(0, page - 1))} disabled={page === 0} hitSlop={10} accessibilityLabel="Later" style={{ opacity: page === 0 ? 0.3 : 1 }}>
+        </Press>
+        <Press onPress={() => setPage(Math.max(0, page - 1))} disabled={page === 0} hitSlop={10} accessibilityLabel="Later" style={{ opacity: page === 0 ? 0.3 : 1 }}>
           <ChevronRight size={20} color={C.ink} />
-        </Pressable>
+        </Press>
       </View>
       <Text style={ui.soft}>{page === 0 ? 'The last two weeks' : fmtRange()}</Text>
 

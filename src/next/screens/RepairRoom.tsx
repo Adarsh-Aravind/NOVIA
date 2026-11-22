@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Press } from '../components/Press';
 import * as Haptics from 'expo-haptics';
 import { Check, ChevronDown, ChevronUp, Send } from 'lucide-react-native';
 
@@ -62,10 +63,10 @@ export function RepairRoom({ coupleId, me, partnerName }: { coupleId: string; me
       {composing ? (
         <Compose coupleId={coupleId} me={me} onDone={() => setComposing(false)} />
       ) : (
-        <Pressable onPress={() => setComposing(true)} style={styles.start} accessibilityRole="button">
+        <Press onPress={() => setComposing(true)} style={styles.start} accessibilityRole="button">
           <Text style={styles.startTitle}>Something hurt?</Text>
           <Text style={ui.soft}>Start a repair. Say what you feel and need, and fix it together.</Text>
-        </Pressable>
+        </Press>
       )}
 
       {open.length === 0 && done.length === 0 && !composing && (
@@ -100,18 +101,15 @@ function Chips({ options, value, onChange, colour }: { options: string[]; value:
       {options.map((o) => {
         const on = value === o;
         return (
-          <Pressable
+          <Press
             key={o}
-            onPress={() => {
-              Haptics.selectionAsync();
-              onChange(on ? '' : o);
-            }}
+            onPress={() => onChange(on ? '' : o)}
             style={[styles.chip, on && { borderColor: colour, backgroundColor: 'rgba(255,255,255,0.08)' }]}
             accessibilityRole="button"
             accessibilityState={{ selected: on }}
           >
             <Text style={[styles.chipText, on && { color: C.ink }]}>{o}</Text>
-          </Pressable>
+          </Press>
         );
       })}
     </View>
@@ -170,9 +168,9 @@ function Compose({ coupleId, me, onDone }: { coupleId: string; me: string; onDon
       <Label>Cool down first?</Label>
       <View style={styles.chips}>
         {COOL.map((c, i) => (
-          <Pressable key={c.label} onPress={() => setCool(i)} style={[styles.chip, cool === i && { borderColor: C.star, backgroundColor: 'rgba(255,255,255,0.08)' }]}>
+          <Press key={c.label} onPress={() => setCool(i)} style={[styles.chip, cool === i && { borderColor: C.star, backgroundColor: 'rgba(255,255,255,0.08)' }]}>
             <Text style={[styles.chipText, cool === i && { color: C.ink }]}>{c.label}</Text>
-          </Pressable>
+          </Press>
         ))}
       </View>
       {error && <Text style={styles.error}>{error}</Text>}
@@ -254,10 +252,10 @@ function RepairCard({
         </View>
       )}
 
-      <Pressable onPress={() => setOpenThread(!openThread)} style={styles.threadToggle} accessibilityRole="button">
+      <Press onPress={() => setOpenThread(!openThread)} style={styles.threadToggle} accessibilityRole="button">
         <Text style={styles.meta}>{replies.length ? `${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}` : 'Talk it through'}</Text>
         {openThread ? <ChevronUp size={16} color={C.inkSoft} /> : <ChevronDown size={16} color={C.inkSoft} />}
-      </Pressable>
+      </Press>
       {openThread && (
         <View style={{ gap: 8 }}>
           {replies.map((r) => (
@@ -267,9 +265,9 @@ function RepairCard({
           ))}
           <View style={ui.row}>
             <Field placeholder={coolMs > 0 ? 'Still cooling down. Write when ready.' : 'Say it kindly'} value={reply} onChangeText={setReply} style={{ flex: 1 }} />
-            <Pressable onPress={send} style={styles.send} accessibilityRole="button" accessibilityLabel="Send reply">
+            <Press onPress={send} style={styles.send} accessibilityRole="button" accessibilityLabel="Send reply">
               <Send size={18} color={C.night} />
-            </Pressable>
+            </Press>
           </View>
         </View>
       )}
@@ -288,10 +286,10 @@ function RepairCard({
                 ? `${partnerName} says you're good`
                 : 'Both tap when it’s settled'}
         </Text>
-        <Pressable onPress={confirm} style={[styles.good, iConfirmed && styles.goodOn]} accessibilityRole="button" accessibilityState={{ checked: iConfirmed }}>
+        <Press onPress={confirm} style={[styles.good, iConfirmed && styles.goodOn]} accessibilityRole="button" accessibilityState={{ checked: iConfirmed }}>
           {iConfirmed && <Check size={14} color={C.night} strokeWidth={3} />}
           <Text style={[styles.goodText, iConfirmed && { color: C.night }]}>{iConfirmed ? 'We’re good' : 'We’re good?'}</Text>
-        </Pressable>
+        </Press>
       </View>
     </Card>
   );

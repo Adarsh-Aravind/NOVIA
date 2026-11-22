@@ -1,6 +1,8 @@
 import React, { useMemo } from 'react';
 import { Canvas, Circle, Fill, Group, Path, Shader, Skia, BlurMask, useClock } from '@shopify/react-native-skia';
-import { useDerivedValue } from 'react-native-reanimated';
+import { cancelAnimation, useDerivedValue, useSharedValue, withDecay, withDelay, withSpring } from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { SPRING, soften } from '../motion';
 import { PLACES } from './places';
 import { C, rgb } from '../theme';
 
@@ -90,9 +92,48 @@ export function Globe({ size, from, to, here, progress }: Props) {
   const ends = [from.lat * RAD, from.lng * RAD, to.lat * RAD, to.lng * RAD];
 
   // Face the walkers, with a slow sway so the globe feels alive.
+  // Grab it and spin it. The globe turns 1:1 under the finger (from wherever
+  // it was when grabbed, so catching it mid-spin just stops it in your hand),
+  // keeps spinning with the flick's momentum, then after a moment eases back
+  // to face the two of you. Tilt is rubber-banded so you can't flip it over.
+  const offLng = useSharedValue(0);
+  const offLat = useSharedValue(0);
+  const startLng = useSharedValue(0);
+  const startLat = useSharedValue(0);
+  const home = { mass: 1, stiffness: 44, damping: 13.3 }; // dampingRatio 1, response ~0.95 s: an unhurried return
+
+  const spin = Gesture.Pan()
+    .activeOffsetX([-10, 10])
+    .failOffsetY([-14, 14])
+    .onStart(() => {
+      cancelAnimation(offLng);
+      cancelAnimation(offLat);
+      startLng.value = offLng.value;
+      startLat.value = offLat.value;
+    })
+    .onUpdate((e) => {
+      offLng.value = startLng.value - e.translationX / R;
+      offLat.value = soften(startLat.value + e.translationY / R, -0.7, 0.7, 1.5);
+    })
+    .onEnd((e) => {
+      // Spin on with the finger's own velocity (in radians/s). When it comes
+      // to rest, drop whole turns (invisible, since a turn looks the same),
+      // then ease home the short way round.
+      offLng.value = withDecay({ velocity: -e.velocityX / R, deceleration: 0.997 }, (finished) => {
+        if (!finished) return;
+        const turn = Math.PI * 2;
+        offLng.value = offLng.value - Math.round(offLng.value / turn) * turn;
+        offLng.value = withDelay(1400, withSpring(0, home));
+      });
+      offLat.value = withSpring(0, { ...SPRING.flick, velocity: e.velocityY / R });
+    });
+
   const view = useDerivedValue(() => {
     const t = clock.value / 1000;
-    return { lat0: Math.max(-0.9, Math.min(0.9, hereLat * 0.7 + 0.25)), lng0: hereLng + Math.sin(t / 7) * 0.35 };
+    return {
+      lat0: Math.max(-1.2, Math.min(1.2, hereLat * 0.7 + 0.25 + offLat.value)),
+      lng0: hereLng + Math.sin(t / 7) * 0.35 + offLng.value,
+    };
   });
 
   const uniforms = useDerivedValue(() => ({ c: [cx, cy], r: R, lat0: view.value.lat0, lng0: view.value.lng0, tint }));
@@ -158,6 +199,7 @@ export function Globe({ size, from, to, here, progress }: Props) {
   const pulse = useDerivedValue(() => 9 + 3 * Math.sin(clock.value / 300));
 
   return (
+    <GestureDetector gesture={spin}>
     <Canvas style={{ width: size, height: size }}>
       <Fill>
         <Shader source={sphereEffect} uniforms={uniforms} />
@@ -179,5 +221,6 @@ export function Globe({ size, from, to, here, progress }: Props) {
         <Circle cx={hx} cy={hy} r={5} color={C.star} />
       </Group>
     </Canvas>
+    </GestureDetector>
   );
 }

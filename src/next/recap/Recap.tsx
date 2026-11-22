@@ -1,6 +1,9 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated, { FadeIn, runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import { Press } from '../components/Press';
+import { SPRING, project, rubberband } from '../motion';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Canvas, Circle, LinearGradient, Rect, vec } from '@shopify/react-native-skia';
 import * as Haptics from 'expo-haptics';
@@ -79,6 +82,39 @@ export function Recap({ data, myName, partnerName, onClose }: { data: RecapData;
   const stars = useStarfield(width, height, i + 1);
   const last = i === cards.length - 1;
 
+  // Pull the story down to put it away. It follows the finger 1:1, shrinks a
+  // touch and lets the app show through as it goes, and resists being pushed
+  // up. Let go and it projects where the flick was heading: past a third of
+  // the screen it leaves downwards at the finger's own speed (the way it'd
+  // keep falling), otherwise it springs back into place.
+  const pull = useSharedValue(0);
+  const close = () => onClose();
+  const swipe = Gesture.Pan()
+    .activeOffsetY(12)
+    .failOffsetX([-24, 24])
+    .onUpdate((e) => {
+      pull.value = e.translationY >= 0 ? e.translationY : rubberband(e.translationY, height);
+    })
+    .onEnd((e) => {
+      if (pull.value + project(e.velocityY) > height / 3) {
+        const remaining = Math.max(height - pull.value, 1);
+        const ms = Math.min(320, Math.max(140, (remaining / Math.max(e.velocityY, 1)) * 1000));
+        pull.value = withTiming(height, { duration: ms }, (done) => {
+          if (done) runOnJS(close)();
+        });
+      } else {
+        pull.value = withSpring(0, { ...SPRING.flick, velocity: e.velocityY });
+      }
+    });
+  const sheet = useAnimatedStyle(() => {
+    const p = Math.min(Math.max(pull.value / height, 0), 1);
+    return {
+      transform: [{ translateY: pull.value }, { scale: 1 - p * 0.08 }],
+      borderRadius: p > 0 ? 28 : 0,
+      opacity: 1 - p * 0.35,
+    };
+  });
+
   const go = (d: number) => {
     const n = i + d;
     if (n < 0) return;
@@ -99,7 +135,10 @@ export function Recap({ data, myName, partnerName, onClose }: { data: RecapData;
   };
 
   return (
-    <Modal visible animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+    <Modal visible animationType="fade" transparent statusBarTranslucent onRequestClose={onClose}>
+      <GestureHandlerRootView style={styles.flex}>
+      <GestureDetector gesture={swipe}>
+      <Animated.View style={[styles.flex, styles.clip, sheet]}>
       <View ref={cardRef} collapsable={false} style={styles.root}>
         <Canvas style={StyleSheet.absoluteFill}>
           <Rect x={0} y={0} width={width} height={height}>
@@ -136,16 +175,21 @@ export function Recap({ data, myName, partnerName, onClose }: { data: RecapData;
       <Pressable style={[styles.half, { right: 0 }]} onPress={() => go(1)} accessibilityLabel="Next" />
 
       {last && (
-        <Pressable onPress={share} style={[styles.share, { bottom: insets.bottom + 32 }]} accessibilityRole="button">
+        <Press onPress={share} style={[styles.share, { bottom: insets.bottom + 32 }]} accessibilityRole="button">
           <Share2 size={18} color={C.night} />
           <Text style={styles.shareText}>Share</Text>
-        </Pressable>
+        </Press>
       )}
+      </Animated.View>
+      </GestureDetector>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
+  clip: { overflow: 'hidden', backgroundColor: C.night },
   root: { flex: 1, backgroundColor: C.night },
   content: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: 28, gap: 8 },
   kicker: { fontFamily: F.semibold, fontSize: 13, letterSpacing: 1.6, textTransform: 'uppercase', color: C.inkSoft },

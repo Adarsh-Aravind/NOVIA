@@ -99,6 +99,35 @@ Expo SDK 54 / React Native 0.81, unchanged backend. Added:
   time. A database trigger logs every mood change from either app, and the old
   daily check-ins fill in the history from before that.
 
+## Feel
+
+The interactions follow Apple's fluid-interface rules (WWDC 2018, *Designing
+Fluid Interfaces*). They use the app's own spring tokens
+([`constants/motion.ts`](../src/constants/motion.ts): damping ratio and
+response) and the worklet helpers in [`next/motion.ts`](../src/next/motion.ts)
+(momentum projection and rubber-banding).
+
+- **Touch-down feedback everywhere.** `Press` sinks on touch-down with a
+  light tick and springs back on release, critically damped because a tap
+  carries no momentum. The dock's active pill is one shape that slides and
+  stretches between tabs.
+- **The hold answers at once.** Your light starts swelling the moment a
+  finger lands and fills until the hold commits at 220 ms. Lift early and it
+  settles back from wherever it got to.
+- **No bounce where nothing was thrown.** The lights drifting apart or
+  meeting, and the merge, use critically damped springs, which re-target
+  mid-move if presence changes again.
+- **The Sky panel** tracks the finger 1:1, rubber-bands past either end, and
+  on release projects the flick's landing point, settling open or closed on
+  the sheet spring with the finger's velocity handed over. Pulled up, it
+  shows the week's walking, the streak and quick actions.
+- **The globe** spins under the finger and carries a flick's momentum. It
+  drops whole turns once it stops, then eases back to face your route.
+  Horizontal drags spin it; vertical drags still scroll the page.
+- **The recap** pulls down to close. It follows the finger, shrinks a little,
+  resists being pushed up, and leaves at the finger's speed past a third of
+  the screen, otherwise springing back.
+
 ## Realtime (holding, nudges, "here")
 
 All of it runs on Supabase Realtime **Broadcast**, through one channel per

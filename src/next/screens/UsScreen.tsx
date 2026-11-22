@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Press } from '../components/Press';
 import * as Haptics from 'expo-haptics';
 import { Check, Plus } from 'lucide-react-native';
 
@@ -43,10 +44,7 @@ export function UsScreen({ profile, partner, coupleId, bottomInset }: Props) {
       header={
         <Segments
           value={section}
-          onChange={(v) => {
-            Haptics.selectionAsync();
-            setSection(v);
-          }}
+          onChange={setSection}
           options={[
             { key: 'notes', label: 'Notes' },
             { key: 'plans', label: 'Plans' },
@@ -89,9 +87,9 @@ function Composer({ placeholder, onSubmit, onTyping }: { placeholder: string; on
         returnKeyType="done"
         onSubmitEditing={send}
       />
-      <Pressable onPress={send} style={[styles.add, !text.trim() && { opacity: 0.4 }]} accessibilityRole="button" accessibilityLabel="Add">
+      <Press onPress={send} style={[styles.add, !text.trim() && { opacity: 0.4 }]} accessibilityRole="button" accessibilityLabel="Add">
         <Plus size={20} color={C.night} />
-      </Pressable>
+      </Press>
     </View>
   );
 }
@@ -109,10 +107,12 @@ function Notes({ coupleId, me, partnerName, who }: { coupleId: string; me: strin
           {notes.map((n) => {
             const reactions = Object.values(n.reactions ?? {});
             return (
-              <Pressable
+              <Press
                 key={n.id}
+                depth={0.985}
+                haptic={false}
                 onLongPress={() => {
-                  Haptics.selectionAsync();
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   toggleReaction(n, '❤️');
                 }}
               >
@@ -124,7 +124,7 @@ function Notes({ coupleId, me, partnerName, who }: { coupleId: string; me: strin
                     {reactions.length > 0 && <Text style={styles.react}>{reactions.join(' ')}</Text>}
                   </View>
                 </Card>
-              </Pressable>
+              </Press>
             );
           })}
         </View>
@@ -227,13 +227,13 @@ function Dates({ coupleId, me }: { coupleId: string; me: string }) {
 
 function CheckRow({ title, sub, done, colour, onToggle }: { title: string; sub?: string; done: boolean; colour: string; onToggle: () => void }) {
   return (
-    <Pressable onPress={onToggle} style={styles.check} accessibilityRole="checkbox" accessibilityState={{ checked: done }}>
+    <Press onPress={onToggle} style={styles.check} accessibilityRole="checkbox" accessibilityState={{ checked: done }}>
       <View style={[styles.box, { borderColor: colour }, done && { backgroundColor: colour }]}>{done && <Check size={14} color={C.night} strokeWidth={3} />}</View>
       <View style={{ flex: 1 }}>
         <Text style={[ui.body, done && { color: C.inkSoft, textDecorationLine: 'line-through' }]}>{title}</Text>
         {sub ? <Text style={ui.soft}>{sub}</Text> : null}
       </View>
-    </Pressable>
+    </Press>
   );
 }
 
