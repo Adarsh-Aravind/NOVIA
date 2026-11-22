@@ -69,3 +69,19 @@ export async function saveWidgetState(patch: Partial<WidgetState>): Promise<void
     // No widget module in this build.
   }
 }
+
+/**
+ * Forget everything the widgets show (names, moods, the together-since date)
+ * and redraw them blank. Called on sign-out and when a couple unpairs, so a
+ * widget left on the home or lock screen stops showing your details and its
+ * nudge button stops working.
+ */
+export async function clearWidgetState(): Promise<void> {
+  last = '';
+  try {
+    await AsyncStorage.removeItem(KEY);
+  } catch {
+    // Nothing cached.
+  }
+  await saveWidgetState({ ...EMPTY_WIDGET_STATE });
+}

@@ -61,6 +61,16 @@ export function daysToNextAnniversary(iso: string, now = new Date()): number {
 
 /** Both lights. Tap your partner's to send a nudge. */
 export function LightsWidget({ state }: { state: WidgetState }) {
+  if (!state.coupleId) {
+    return (
+      <FlexWidget
+        clickAction="OPEN_APP"
+        style={{ height: 'match_parent', width: 'match_parent', backgroundColor: NIGHT, borderRadius: 28, padding: 14, justifyContent: 'center', alignItems: 'center' }}
+      >
+        <TextWidget text="Open NOVIA to see your lights" style={{ fontSize: 13, color: SOFT, textAlign: 'center' }} />
+      </FlexWidget>
+    );
+  }
   const word = MOOD_WORD[state.partnerMood] ?? 'steady';
   return (
     <FlexWidget

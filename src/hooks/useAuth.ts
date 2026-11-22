@@ -187,12 +187,19 @@ export function useAuth() {
 
       // Pairing runs through a validated SECURITY DEFINER RPC so neither the
       // couple row nor couple_id can be spoofed from the client.
-      const { error } = await supabase.rpc('pair_with_partner', {
+      // Pairing needs consent (20261123_pair_consent_and_locations.sql): this
+      // either accepts a request they already sent you (returns the couple
+      // id) or records yours for them to accept (returns null).
+      const { data, error } = await supabase.rpc('pair_with_partner', {
         partner_uuid: partnerUserId,
       });
 
       if (error) throw error;
 
+      if (!data) {
+        Alert.alert('Request sent', 'Ask your partner to open NOVIA and accept your request.');
+        return;
+      }
       Alert.alert("Success", "Successfully paired with your partner!");
       await bootstrapUser(session.user.id);
     } catch (err: any) {

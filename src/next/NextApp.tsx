@@ -27,6 +27,7 @@ import { useStreak } from './hooks/useStreak';
 import { TogetherProvider } from './hooks/useTogether';
 import { MoneyProvider } from './hooks/useMoney';
 import { checkAndApplyUpdate } from '../services/updates';
+import { clearWidgetState } from './widgets/state';
 
 /**
  * NOVIA. The app's root: fonts, gesture handling, sign-in, pairing, and the
@@ -73,6 +74,12 @@ function Root() {
     if (auth.session) configureNext().catch(() => undefined);
   }, [auth.session]);
 
+  // Signed out or unpaired: blank the home/lock-screen widgets, so they stop
+  // showing your details and their nudge button stops working.
+  useEffect(() => {
+    if (!auth.loading && (!auth.session || !auth.coupleId)) clearWidgetState().catch(() => undefined);
+  }, [auth.loading, auth.session, auth.coupleId]);
+
   // Pick up any over-the-air update on launch.
   useEffect(() => {
     checkAndApplyUpdate().catch(() => undefined);
@@ -84,7 +91,7 @@ function Root() {
   if (auth.loading && !auth.profile) return <View style={styles.root} />;
   if (!auth.session) return <AuthScreen signIn={auth.signIn} signUp={auth.signUp} onForgot={(email) => setResetting(email)} />;
   if (!auth.profile || !auth.coupleId) {
-    return <PairScreen profile={auth.profile} pairPartner={auth.pairPartner} signOut={auth.signOut} />;
+    return <PairScreen profile={auth.profile} signOut={auth.signOut} refetch={auth.refetchAuth} />;
   }
 
   const dockSpace = insets.bottom + 76;
