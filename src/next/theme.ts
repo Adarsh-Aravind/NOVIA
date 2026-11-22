@@ -17,8 +17,8 @@ export const C = {
   dusk: '#1A1336',
 
   ink: '#F4F0FB',
-  inkSoft: '#B3ACC9',
-  inkFaint: '#7A7394',
+  inkSoft: '#CDC7DF',
+  inkFaint: '#A39CBC',
   line: 'rgba(244,240,251,0.10)',
   lineStrong: 'rgba(244,240,251,0.18)',
 

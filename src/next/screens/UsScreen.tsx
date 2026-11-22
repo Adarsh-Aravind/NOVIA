@@ -115,14 +115,15 @@ function Notes({ coupleId, me, partnerName, who }: { coupleId: string; me: strin
                   Haptics.selectionAsync();
                   toggleReaction(n, '❤️');
                 }}
-                style={[styles.note, { borderTopColor: who(n.created_by) }]}
               >
-                <Text style={ui.body}>{n.content}</Text>
-                <View style={ui.row}>
-                  <Text style={[styles.meta, { color: who(n.created_by) }]}>{n.created_by === me ? 'You' : partnerName}</Text>
-                  <Text style={styles.meta}>{new Date(n.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</Text>
-                  {reactions.length > 0 && <Text style={styles.react}>{reactions.join(' ')}</Text>}
-                </View>
+                <Card style={{ borderTopColor: who(n.created_by), borderTopWidth: 2 }}>
+                  <Text style={ui.body}>{n.content}</Text>
+                  <View style={ui.row}>
+                    <Text style={[styles.meta, { color: who(n.created_by) }]}>{n.created_by === me ? 'You' : partnerName}</Text>
+                    <Text style={styles.meta}>{new Date(n.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</Text>
+                    {reactions.length > 0 && <Text style={styles.react}>{reactions.join(' ')}</Text>}
+                  </View>
+                </Card>
               </Pressable>
             );
           })}
@@ -240,13 +241,6 @@ const styles = StyleSheet.create({
   composer: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   add: { width: 48, height: 48, borderRadius: 24, backgroundColor: C.star, alignItems: 'center', justifyContent: 'center' },
   grid: { gap: 10 },
-  note: {
-    padding: 14,
-    borderRadius: R.md,
-    backgroundColor: 'rgba(255,255,255,0.045)',
-    borderTopWidth: 2,
-    gap: 10,
-  },
   meta: { fontFamily: F.semibold, fontSize: 12, color: C.inkSoft },
   react: { marginLeft: 'auto', fontSize: 14 },
   check: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4 },

@@ -1,10 +1,11 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, TextInputProps, useWindowDimensions, View, ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Canvas, LinearGradient, Rect, vec } from '@shopify/react-native-skia';
+import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
+import { BlurView } from 'expo-blur';
+import Svg, { Defs, LinearGradient as SvgGradient, Rect, Stop } from 'react-native-svg';
+import { Backdrop } from './Backdrop';
 import { C, F, R } from '../theme';
-
-const GLOW_H = 520;
 
 /** A scrolling page with a big title, clear of the status bar and the dock. */
 export function Page({
@@ -21,15 +22,16 @@ export function Page({
   header?: React.ReactNode;
 }) {
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const scrollY = useSharedValue(0);
+  const onScroll = useAnimatedScrollHandler((e) => {
+    scrollY.value = e.contentOffset.y;
+  });
   return (
     <View style={styles.page}>
-      <Canvas style={styles.glow} pointerEvents="none">
-        <Rect x={0} y={0} width={width} height={GLOW_H}>
-          <LinearGradient start={vec(0, 0)} end={vec(0, GLOW_H)} colors={[C.dusk, 'rgba(26,19,54,0.45)', 'rgba(7,6,14,0)']} />
-        </Rect>
-      </Canvas>
-      <ScrollView
+      <Backdrop scrollY={scrollY} />
+      <Animated.ScrollView
+        onScroll={onScroll}
+        scrollEventThrottle={16}
         contentContainerStyle={{ paddingTop: insets.top + 18, paddingBottom: bottomInset + 24, paddingHorizontal: 18, gap: 14 }}
         keyboardShouldPersistTaps="handled"
       >
@@ -39,13 +41,44 @@ export function Page({
         </View>
         {header}
         {children}
-      </ScrollView>
+      </Animated.ScrollView>
     </View>
   );
 }
 
+/**
+ * Milky frosted glass. A real blur of whatever is behind the card (Android's
+ * blur through expo-blur), a white frost over it, a bright top rim where the
+ * light catches the edge, and a soft shadow underneath to lift it off the
+ * page. The blur keeps refreshing as you scroll, so the backdrop smears past
+ * behind the glass.
+ */
 export function Card({ children, style }: { children: React.ReactNode; style?: ViewStyle }) {
-  return <View style={[styles.card, style]}>{children}</View>;
+  // The outer view does the rounding and clipping (Android clips a plain
+  // view to its radius reliably; the native blur view on its own doesn't).
+  return (
+    <View style={[styles.card, style]}>
+      <BlurView
+        pointerEvents="none"
+        intensity={50}
+        tint="default"
+        blurReductionFactor={2.5}
+        experimentalBlurMethod="dimezisBlurView"
+        style={StyleSheet.absoluteFill}
+      />
+      <Svg pointerEvents="none" style={StyleSheet.absoluteFill} preserveAspectRatio="none" viewBox="0 0 100 100">
+        <Defs>
+          <SvgGradient id="sheen" x1="0" y1="0" x2="0.35" y2="1">
+            <Stop offset="0" stopColor="#FFFFFF" stopOpacity="0.16" />
+            <Stop offset="0.4" stopColor="#FFFFFF" stopOpacity="0.04" />
+            <Stop offset="1" stopColor="#FFFFFF" stopOpacity="0" />
+          </SvgGradient>
+        </Defs>
+        <Rect x="0" y="0" width="100" height="100" fill="url(#sheen)" />
+      </Svg>
+      {children}
+    </View>
+  );
 }
 
 export function Label({ children }: { children: React.ReactNode }) {
@@ -118,15 +151,18 @@ export const ui = StyleSheet.create({
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: C.night },
-  glow: { position: 'absolute', top: 0, left: 0, right: 0, height: GLOW_H },
   kicker: { fontFamily: F.semibold, fontSize: 12, letterSpacing: 1.4, textTransform: 'uppercase', color: C.inkSoft },
   title: { fontFamily: F.display, fontSize: 34, lineHeight: 38, color: C.ink, letterSpacing: -0.8 },
   card: {
     padding: 16,
     borderRadius: R.lg,
-    backgroundColor: 'rgba(255,255,255,0.045)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: C.line,
+    overflow: 'hidden',
+    // A whisper of white even before the blur draws, so a phone without blur
+    // still gets frosted panes rather than holes.
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+    borderTopColor: 'rgba(255,255,255,0.38)',
     gap: 10,
   },
   label: { fontFamily: F.semibold, fontSize: 11, letterSpacing: 1.2, textTransform: 'uppercase', color: C.inkFaint },
