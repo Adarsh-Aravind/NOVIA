@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, Pressable, StyleSheet, Text, useWindowDimensions, Vibration, View } from 'react-native';
+import { Pressable, StyleSheet, Text, useWindowDimensions, Vibration, View } from 'react-native';
 import Animated, {
   FadeIn,
   FadeOut,
@@ -26,7 +26,6 @@ import { daysUntilNext, occursOn, elapsedAt, formatElapsed } from '../../utils/m
 import type { Profile } from '../../types';
 import { C, F, R, MOODS, moodAdvice, moodLight, skyAt } from '../theme';
 import { saveWidgetState } from '../widgets/state';
-import { CH, notify } from '../notify/notify';
 
 interface Props {
   profile: Profile;
@@ -81,7 +80,7 @@ export function SkyScreen({ profile, partner, coupleId, bottomInset, streak }: P
   const partnerName = partner?.display_name || 'Your partner';
 
   const { stars, first } = useConstellation(coupleId, userId);
-  const together = useTogether(coupleId, userId);
+  const together = useTogether();
   const { currentMood, partnerMood, updateMood } = useMood(coupleId, userId, partner?.current_mood ?? 'Neutral');
   const steps = useSteps(coupleId, userId, partner?.id);
   const { milestones } = useMilestones(coupleId, userId);
@@ -157,10 +156,8 @@ export function SkyScreen({ profile, partner, coupleId, bottomInset, streak }: P
   useEffect(() => {
     if (together.nudgeCount === lastNudge.current) return;
     lastNudge.current = together.nudgeCount;
-    if (AppState.currentState !== 'active') {
-      notify({ channel: CH.partner, title: `${partnerName} is thinking of you`, body: 'Tap their light to send one back.', trigger: null, key: `nudge:${Date.now()}` }).catch(() => undefined);
-    }
-    Vibration.vibrate([0, 30, 110, 30]);
+    // The vibration and background notification come from TogetherProvider;
+    // this screen adds the ring and the toast.
     rippleFromMe.value = 0;
     ripple.value = 0;
     ripple.value = withTiming(1, { duration: 1600 });
@@ -174,7 +171,11 @@ export function SkyScreen({ profile, partner, coupleId, bottomInset, streak }: P
     rippleFromMe.value = 1;
     ripple.value = 0;
     ripple.value = withTiming(1, { duration: 1600 });
-    showToast(together.partnerHere ? `Sent to ${partnerName}` : `Sent. ${partnerName} feels it next time they're here`);
+    showToast(
+      together.partnerHere
+        ? `Sent to ${partnerName}`
+        : `Sent, but ${partnerName} isn't in NOVIA right now. Nudges only reach an open app.`
+    );
   };
 
   const startHold = () => {
@@ -183,7 +184,8 @@ export function SkyScreen({ profile, partner, coupleId, bottomInset, streak }: P
     meHold.value = withTiming(1, { duration: 400 });
   };
   const endHold = () => {
-    if (!together.holding) return;
+    // Always release: setHolding ignores it if nothing is held, and a check
+    // against `together.holding` here could read a stale value.
     together.setHolding(false);
     meHold.value = withTiming(0, { duration: 400 });
   };

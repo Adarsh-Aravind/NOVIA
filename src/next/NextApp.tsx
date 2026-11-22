@@ -23,6 +23,7 @@ import { ResetScreen } from './screens/ResetScreen';
 import { Reminders } from './notify/Reminders';
 import { configureNext } from './notify/notify';
 import { useStreak } from './hooks/useStreak';
+import { TogetherProvider } from './hooks/useTogether';
 
 /**
  * NOVIA Next. The redesign, booted by EXPO_PUBLIC_NEXT=1 (see index.ts).
@@ -81,6 +82,7 @@ function Root() {
   const common = { profile: auth.profile, partner: auth.partnerProfile, coupleId: auth.coupleId, bottomInset: dockSpace };
 
   return (
+    <TogetherProvider coupleId={auth.coupleId} userId={auth.profile.id} partnerName={auth.partnerProfile?.display_name || 'Your partner'}>
     <View style={styles.root}>
       <Reminders
         coupleId={auth.coupleId}
@@ -94,6 +96,7 @@ function Root() {
       {tab === 'you' && <YouScreen {...common} signOut={auth.signOut} onRemindersChanged={() => setReminderVersion((v) => v + 1)} />}
       <Dock tab={tab} onChange={setTab} bottom={insets.bottom} />
     </View>
+    </TogetherProvider>
   );
 }
 

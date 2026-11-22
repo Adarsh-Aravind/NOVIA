@@ -99,6 +99,49 @@ Expo SDK 54 / React Native 0.81, unchanged backend. Added:
   time. A database trigger logs every mood change from either app, and the old
   daily check-ins fill in the history from before that.
 
+## Realtime (holding, nudges, "here")
+
+All of it runs on Supabase Realtime **Broadcast**, through one channel per
+couple, opened once at the app's root by `TogetherProvider`
+([`useTogether.tsx`](../src/next/hooks/useTogether.tsx)), so it works on every
+tab.
+
+Presence was the first design, and testing against the live server with two
+simulated phones ruled it out:
+
+- Presence updates are rate-limited per client, and a burst of three closes
+  the channel ("Client presence rate limit exceeded"). Nudges and holds then
+  die until a restart. Pressing and releasing your light a few times was
+  enough to trigger it.
+- Presence lags about 1.4 s, which is too slow for "hold at the same time".
+- After a few re-announcements, the other phone's presence state keeps
+  phantom entries with no `presence_ref`, which never leave. A partner could
+  look "here" forever.
+
+The protocol, all over Broadcast (about 60 to 80 ms):
+
+| Message | When | Effect on the other phone |
+| --- | --- | --- |
+| `hello` | joining, coming to the foreground | partner is here; answers `here` if open |
+| `here` | every 10 s while in the foreground | partner is here |
+| `away` | leaving the foreground | partner is away, and their hold ends |
+| `hold` `{on}` | press, release, and every 1.5 s while held | partner holding or not |
+| `nudge` | tapping their light (at most once per 0.8 s) | two taps, a ring, and a notification if backgrounded |
+
+Anything not heard from times out by itself: a hold after 4.5 s, a partner
+after 25 s. A channel the server closes is rebuilt after 2 s, waiting for the
+old channel to be fully removed first, because `supabase.channel()` reuses a
+channel by topic and removing one is asynchronous.
+
+`node scripts/together-check.mjs` runs two simulated phones through all of
+this (25 checks, including frantic presses, app flipping, a forced reconnect
+and a phone dying mid-hold) on a throwaway topic. It passed 4 of 4 runs.
+
+The channel is public: anyone holding both the publishable key and the
+couple's id could send to it. The id is an unguessable UUID that never leaves
+the two accounts, but a private channel with Realtime authorization would
+close that gap.
+
 The schema changes are
 [`20261122_next_repair_journeys.sql`](../supabase/migrations/20261122_next_repair_journeys.sql)
 and [`20261122_next_weather_streak.sql`](../supabase/migrations/20261122_next_weather_streak.sql).
