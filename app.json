@@ -2,7 +2,7 @@
   "expo": {
     "name": "NOVIA",
     "slug": "noviris",
-    "version": "2.1.0",
+    "version": "3.0.0",
     "orientation": "portrait",
     "icon": "./assets/novia-icon.png",
     "userInterfaceStyle": "dark",

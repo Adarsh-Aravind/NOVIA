@@ -50,12 +50,18 @@ CREATE TRIGGER profiles_log_mood
 -- 2. Together streak -----------------------------------------------------------
 -- One row per person per day they opened NOVIA Next. The streak is the run of
 -- consecutive days on which both of you have a row.
+-- A surrogate primary key on purpose: Realtime DELETE events skip RLS and
+-- carry only the primary key, so a key containing user_id would hand every
+-- signed-in listener the user ids of any couple that unpairs. See
+-- 20261122_together_days_surrogate_key.sql, which fixes databases that were
+-- created with the earlier composite key.
 CREATE TABLE IF NOT EXISTS public.together_days (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     couple_id UUID NOT NULL REFERENCES public.couples(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
     day DATE NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (couple_id, user_id, day)
+    CONSTRAINT together_days_couple_user_day_key UNIQUE (couple_id, user_id, day)
 );
 
 ALTER TABLE public.together_days ENABLE ROW LEVEL SECURITY;
