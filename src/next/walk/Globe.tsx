@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Canvas, Circle, Fill, Group, Path, Shader, Skia, BlurMask, useClock } from '@shopify/react-native-skia';
+import { Canvas, Circle, Fill, Group, Path, Shader, Skia, RadialGradient, vec } from '@shopify/react-native-skia';
 import { cancelAnimation, useDerivedValue, useSharedValue, withDecay, withDelay, withSpring } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { SPRING, soften } from '../motion';
@@ -78,7 +78,6 @@ function routePoints(a: { lat: number; lng: number }, b: { lat: number; lng: num
 }
 
 export function Globe({ size, from, to, here, progress }: Props) {
-  const clock = useClock();
   const R = size * 0.42;
   const cx = size / 2;
   const cy = size / 2;
@@ -128,13 +127,13 @@ export function Globe({ size, from, to, here, progress }: Props) {
       offLat.value = withSpring(0, { ...SPRING.flick, velocity: e.velocityY / R });
     });
 
-  const view = useDerivedValue(() => {
-    const t = clock.value / 1000;
-    return {
-      lat0: Math.max(-1.2, Math.min(1.2, hereLat * 0.7 + 0.25 + offLat.value)),
-      lng0: hereLng + Math.sin(t / 7) * 0.35 + offLng.value,
-    };
-  });
+  // No clock: the globe only redraws while it's being turned or settling.
+  // A constant idle sway made every frosted card on the Care screen re-blur
+  // every frame, which is the most likely source of stutter there.
+  const view = useDerivedValue(() => ({
+    lat0: Math.max(-1.2, Math.min(1.2, hereLat * 0.7 + 0.25 + offLat.value)),
+    lng0: hereLng + offLng.value,
+  }));
 
   const uniforms = useDerivedValue(() => ({ c: [cx, cy], r: R, lat0: view.value.lat0, lng0: view.value.lng0, tint }));
 
@@ -189,6 +188,7 @@ export function Globe({ size, from, to, here, progress }: Props) {
   const done = useDerivedValue(() => geometry.value.done);
   const hx = useDerivedValue(() => geometry.value.here[0]);
   const hy = useDerivedValue(() => geometry.value.here[1]);
+  const hereGlow = useDerivedValue(() => vec(geometry.value.here[0], geometry.value.here[1]));
   const hVis = useDerivedValue(() => (geometry.value.here[2] > 0 ? 1 : 0));
   const ax = useDerivedValue(() => geometry.value.a[0]);
   const ay = useDerivedValue(() => geometry.value.a[1]);
@@ -196,7 +196,6 @@ export function Globe({ size, from, to, here, progress }: Props) {
   const bx = useDerivedValue(() => geometry.value.b[0]);
   const by = useDerivedValue(() => geometry.value.b[1]);
   const bVis = useDerivedValue(() => (geometry.value.b[2] > 0 ? 1 : 0));
-  const pulse = useDerivedValue(() => 9 + 3 * Math.sin(clock.value / 300));
 
   return (
     <GestureDetector gesture={spin}>
@@ -215,8 +214,8 @@ export function Globe({ size, from, to, here, progress }: Props) {
         <Circle cx={bx} cy={by} r={9} color={C.partner} opacity={0.3} />
       </Group>
       <Group opacity={hVis}>
-        <Circle cx={hx} cy={hy} r={pulse} color={C.star} opacity={0.35}>
-          <BlurMask blur={6} style="normal" />
+        <Circle cx={hx} cy={hy} r={14}>
+          <RadialGradient c={hereGlow} r={14} colors={['rgba(255,243,224,0.5)', 'rgba(255,243,224,0)']} />
         </Circle>
         <Circle cx={hx} cy={hy} r={5} color={C.star} />
       </Group>

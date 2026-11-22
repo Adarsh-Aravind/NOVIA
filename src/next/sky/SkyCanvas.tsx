@@ -6,11 +6,11 @@ import {
   DashPathEffect,
   Fill,
   Group,
-  BlurMask,
   Path,
   Shader,
   Skia,
   LinearGradient,
+  RadialGradient,
   vec,
 } from '@shopify/react-native-skia';
 import { SharedValue, useDerivedValue } from 'react-native-reanimated';
@@ -83,6 +83,7 @@ export function starXY(s: Star, w: number) {
 }
 
 const OWNER_COLOUR = { me: C.me, partner: C.partner, us: C.star } as const;
+const GLOW = { me: 'rgba(255,138,61,0.32)', partner: 'rgba(185,168,255,0.32)', us: 'rgba(255,243,224,0.32)' } as const;
 const PARALLAX = [3, 8, 15];
 
 export function SkyCanvas({ width, height, cx, cy, sky, stars, motion, me, partner, partnerAway, streakDays }: Props) {
@@ -212,8 +213,10 @@ export function SkyCanvas({ width, height, cx, cy, sky, stars, motion, me, partn
             {layer.map(({ x, y, s }) => (
               <Group key={s.id}>
                 {s.size > 2.2 && (
-                  <Circle cx={x} cy={y} r={s.size * 2.6} color={OWNER_COLOUR[s.owner]} opacity={0.28}>
-                    <BlurMask blur={s.size * 2} style="normal" />
+                  // A radial-gradient glow costs nothing per frame; a blur
+                  // mask is re-rasterised every frame because the sky turns.
+                  <Circle cx={x} cy={y} r={s.size * 3.2}>
+                    <RadialGradient c={vec(x, y)} r={s.size * 3.2} colors={[GLOW[s.owner], 'rgba(0,0,0,0)']} />
                   </Circle>
                 )}
                 <Circle cx={x} cy={y} r={s.size * (0.7 + d * 0.15)} color={OWNER_COLOUR[s.owner]} />
@@ -228,8 +231,8 @@ export function SkyCanvas({ width, height, cx, cy, sky, stars, motion, me, partn
           <Path path={comet.path}>
             <LinearGradient start={vec(comet.head.x, comet.head.y)} end={vec(comet.tail.x, comet.tail.y)} colors={['rgba(255,243,224,0.95)', 'rgba(255,186,140,0.35)', 'rgba(185,168,255,0)']} />
           </Path>
-          <Circle cx={comet.head.x} cy={comet.head.y} r={9} color={C.star} opacity={0.45}>
-            <BlurMask blur={8} style="normal" />
+          <Circle cx={comet.head.x} cy={comet.head.y} r={14}>
+            <RadialGradient c={vec(comet.head.x, comet.head.y)} r={14} colors={['rgba(255,243,224,0.55)', 'rgba(255,243,224,0)']} />
           </Circle>
           <Circle cx={comet.head.x} cy={comet.head.y} r={3.4} color={C.star} />
         </Group>

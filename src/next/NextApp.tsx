@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { StatusBar, StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFonts } from 'expo-font';
 import { BricolageGrotesque_500Medium } from '@expo-google-fonts/bricolage-grotesque/500Medium';
@@ -90,10 +91,16 @@ function Root() {
         partnerName={auth.partnerProfile?.display_name || 'Your partner'}
         version={reminderVersion}
       />
-      {tab === 'sky' && <SkyScreen {...common} streak={streak} />}
-      {tab === 'us' && <UsScreen {...common} />}
-      {tab === 'care' && <CareScreen {...common} />}
-      {tab === 'you' && <YouScreen {...common} signOut={auth.signOut} onRemindersChanged={() => setReminderVersion((v) => v + 1)} />}
+      {/* Each place fades in over its first frames instead of popping in
+          while it sets itself up. Fading only in (not out as well) keeps a
+          single heavy screen on the GPU at a time. Reanimated drops the fade
+          when the system's reduce-motion setting is on. */}
+      <Animated.View key={tab} entering={FadeIn.duration(200)} style={styles.root}>
+        {tab === 'sky' && <SkyScreen {...common} streak={streak} />}
+        {tab === 'us' && <UsScreen {...common} />}
+        {tab === 'care' && <CareScreen {...common} />}
+        {tab === 'you' && <YouScreen {...common} signOut={auth.signOut} onRemindersChanged={() => setReminderVersion((v) => v + 1)} />}
+      </Animated.View>
       <Dock tab={tab} onChange={setTab} bottom={insets.bottom} />
     </View>
     </TogetherProvider>

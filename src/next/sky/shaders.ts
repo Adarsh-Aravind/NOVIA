@@ -109,6 +109,14 @@ float4 orb(float2 p, float2 c, float r, float3 col, float e, float fl, float h, 
 }
 
 half4 main(float2 p) {
+  // Most of the screen is nowhere near either light. Past about 3.8 radii a
+  // light's halo is under 0.1% and invisible, so unless a ripple or the merge
+  // bloom is showing, those pixels skip the lighting maths entirely.
+  if (ripple <= 0.0 && merge <= 0.001 &&
+      length(p - pA) > rA * 3.8 * (1.0 + hA * 0.3) &&
+      length(p - pB) > rB * 3.8 * (1.0 + hB * 0.3)) {
+    return half4(0.0);
+  }
   float4 A = orb(p, pA, rA, cA, eA, fA, hA, sA);
   float4 B = orb(p, pB, rB, cB, eB, fB, hB, sB);
   float3 col = A.rgb + B.rgb;
