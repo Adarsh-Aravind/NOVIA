@@ -10,6 +10,8 @@ import {
   Path,
   Shader,
   Skia,
+  LinearGradient,
+  vec,
 } from '@shopify/react-native-skia';
 import { SharedValue, useDerivedValue } from 'react-native-reanimated';
 import { skyEffect, orbEffect } from './shaders';
@@ -28,6 +30,11 @@ export function lightPositions(t: number, sep: number, w: number, cx: number, cy
     bx: cx + Math.cos(ang) * d,
     by: cy + Math.sin(ang) * d - bob,
   };
+}
+
+/** Where the streak comet's head sits. Shared with the tap target. */
+export function cometHead(width: number, height: number) {
+  return { x: width * 0.8, y: height * 0.235 };
 }
 
 export const ORB_SCALE = 0.095;
@@ -63,6 +70,8 @@ interface Props {
   me: LightStyle;
   partner: LightStyle;
   partnerAway: boolean;
+  /** Together streak in days; 0 hides the comet. */
+  streakDays: number;
 }
 
 /** Star position before the sky's slow spin, relative to the heart. */
@@ -76,7 +85,7 @@ export function starXY(s: Star, w: number) {
 const OWNER_COLOUR = { me: C.me, partner: C.partner, us: C.star } as const;
 const PARALLAX = [3, 8, 15];
 
-export function SkyCanvas({ width, height, cx, cy, sky, stars, motion, me, partner, partnerAway }: Props) {
+export function SkyCanvas({ width, height, cx, cy, sky, stars, motion, me, partner, partnerAway, streakDays }: Props) {
   const meRGB = rgb(C.me);
   const paRGB = rgb(C.partner);
 
@@ -159,6 +168,30 @@ export function SkyCanvas({ width, height, cx, cy, sky, stars, motion, me, partn
   const layerShift = [shift0, shift1, shift2];
   const twinkle = [tw0, tw1, tw2];
 
+  // The Together streak as a comet: its tail grows a little with every day
+  // you've both shown up, to a cap, and it drifts gently across the top sky.
+  const comet = useMemo(() => {
+    if (streakDays <= 0) return null;
+    const len = Math.min(36 + streakDays * 16, width * 0.62);
+    const head = cometHead(width, height);
+    const ang = Math.PI + 0.2; // tail streams left and a little up, under the header
+    const tx = head.x + Math.cos(ang) * len;
+    const ty = head.y + Math.sin(ang) * len;
+    const nx = -Math.sin(ang);
+    const ny = Math.cos(ang);
+    const w = 3.2 + Math.min(streakDays, 30) * 0.08;
+    const p = Skia.Path.Make();
+    p.moveTo(head.x + nx * w, head.y + ny * w);
+    p.lineTo(tx, ty);
+    p.lineTo(head.x - nx * w, head.y - ny * w);
+    p.close();
+    return { path: p, head, tail: { x: tx, y: ty } };
+  }, [streakDays, width, height]);
+  const cometDrift = useDerivedValue(() => [
+    { translateX: Math.sin(motion.clock.value / 4000) * 6 + motion.tiltX.value * 12 },
+    { translateY: Math.cos(motion.clock.value / 5000) * 4 + motion.tiltY.value * 12 },
+  ]);
+
   return (
     <Canvas style={[StyleSheet.absoluteFill, { width, height }]}>
       <Fill>
@@ -189,6 +222,18 @@ export function SkyCanvas({ width, height, cx, cy, sky, stars, motion, me, partn
           </Group>
         </Group>
       ))}
+
+      {comet && (
+        <Group transform={cometDrift}>
+          <Path path={comet.path}>
+            <LinearGradient start={vec(comet.head.x, comet.head.y)} end={vec(comet.tail.x, comet.tail.y)} colors={['rgba(255,243,224,0.95)', 'rgba(255,186,140,0.35)', 'rgba(185,168,255,0)']} />
+          </Path>
+          <Circle cx={comet.head.x} cy={comet.head.y} r={9} color={C.star} opacity={0.45}>
+            <BlurMask blur={8} style="normal" />
+          </Circle>
+          <Circle cx={comet.head.x} cy={comet.head.y} r={3.4} color={C.star} />
+        </Group>
+      )}
 
       <Fill>
         <Shader source={orbEffect} uniforms={orbUniforms} />

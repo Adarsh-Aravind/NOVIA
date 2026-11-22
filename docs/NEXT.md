@@ -83,9 +83,26 @@ Expo SDK 54 / React Native 0.81, unchanged backend. Added:
   an image.
 - **Step-duel days as stars**, coloured by who won the day.
 
-The schema change is
-[`20261122_next_repair_journeys.sql`](../supabase/migrations/20261122_next_repair_journeys.sql).
-It is additive only.
+- **Frosted glass cards** over a soft SVG aurora (see `components/ui.tsx`).
+- **Notifications, redone** ([`src/next/notify`](../src/next/notify)). A bold
+  status-bar icon replaces the hairline one, the accent is Ember, and there
+  are four channels at the loudness each deserves (Plans and *From your
+  partner* alert; *Dates and anniversaries* and *Cycle* don't), using the
+  system's own sound and vibration. Titles say what or who in sentence case,
+  with one useful line underneath. Reminders sit behind a "Get reminders from
+  NOVIA Next" switch on You, which is off by default so nothing arrives twice
+  while the old app is still installed. Nudges always come through.
+- **Together streak.** A day counts when you both open NOVIA Next. The streak
+  is a comet in the sky whose tail grows with each day; tap it for the count
+  and your best run.
+- **Weather of us** (Care). Both moods, day by day, as weather, two weeks at a
+  time. A database trigger logs every mood change from either app, and the old
+  daily check-ins fill in the history from before that.
+
+The schema changes are
+[`20261122_next_repair_journeys.sql`](../supabase/migrations/20261122_next_repair_journeys.sql)
+and [`20261122_next_weather_streak.sql`](../supabase/migrations/20261122_next_weather_streak.sql).
+Both are additive only.
 
 ## Next passes
 

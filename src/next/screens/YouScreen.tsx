@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { StyleSheet, Switch, Text, View } from 'react-native';
 import { Page, Card, Label, Button, ui } from '../components/ui';
 import { Recap } from '../recap/Recap';
+import { configureNext, remindersEnabled, setRemindersEnabled } from '../notify/notify';
 import { monthStart, useRecap } from '../recap/useRecap';
 import type { Profile } from '../../types';
 import { C, F } from '../theme';
@@ -12,14 +13,25 @@ interface Props {
   coupleId: string;
   bottomInset: number;
   signOut: () => void;
+  onRemindersChanged: () => void;
 }
 
 // What the current app has that this preview does not show yet. Said plainly,
 // so nobody wonders where a feature went.
 const STILL_IN_NOVIA = ['Detected payments', 'Chat & ideas (assistant)', 'Period logging and hospital visits', 'Word of the day'];
 
-export function YouScreen({ profile, partner, coupleId, bottomInset, signOut }: Props) {
+export function YouScreen({ profile, partner, coupleId, bottomInset, signOut, onRemindersChanged }: Props) {
   const [month, setMonth] = useState<Date | null>(null);
+  const [reminders, setReminders] = useState(false);
+  useEffect(() => {
+    remindersEnabled().then(setReminders);
+  }, []);
+  const toggleReminders = async (on: boolean) => {
+    setReminders(on);
+    if (on) await configureNext();
+    await setRemindersEnabled(on);
+    onRemindersChanged();
+  };
   const recap = useRecap(coupleId, profile.id, month);
   const now = new Date();
   const last = monthStart(now, -1);
@@ -38,6 +50,24 @@ export function YouScreen({ profile, partner, coupleId, bottomInset, signOut }: 
             <Button title={`${label(now)} so far`} kind="ghost" onPress={() => setMonth(monthStart(now))} />
           </View>
         </View>
+      </Card>
+      <Card>
+        <View style={styles.row}>
+          <View style={{ flex: 1, gap: 4 }}>
+            <Text style={ui.h2}>Get reminders from NOVIA Next</Text>
+            <Text style={ui.soft}>
+              Plans, dates and the cycle heads-up. Leave this off while the old NOVIA app is still on this phone, or you'll get each reminder twice.
+            </Text>
+          </View>
+          <Switch
+            value={reminders}
+            onValueChange={toggleReminders}
+            trackColor={{ false: 'rgba(255,255,255,0.2)', true: C.me }}
+            thumbColor={C.star}
+            accessibilityLabel="Get reminders from NOVIA Next"
+          />
+        </View>
+        <Text style={ui.soft}>Nudges from {partner?.display_name || 'your partner'} always come through.</Text>
       </Card>
       {month && recap && (
         <Recap
@@ -80,7 +110,7 @@ export function YouScreen({ profile, partner, coupleId, bottomInset, signOut }: 
 
 const styles = StyleSheet.create({
   pair: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  row: { flexDirection: 'row', gap: 10 },
+  row: { flexDirection: 'row', gap: 12, alignItems: 'center' },
   light: { width: 28, height: 28, borderRadius: 14 },
   foot: { fontFamily: F.body, fontSize: 12, color: C.inkFaint, textAlign: 'center' },
 });

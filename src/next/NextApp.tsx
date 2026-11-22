@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { StatusBar, StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,6 +20,9 @@ import { YouScreen } from './screens/YouScreen';
 import { AuthScreen } from './screens/AuthScreen';
 import { PairScreen } from './screens/PairScreen';
 import { ResetScreen } from './screens/ResetScreen';
+import { Reminders } from './notify/Reminders';
+import { configureNext } from './notify/notify';
+import { useStreak } from './hooks/useStreak';
 
 /**
  * NOVIA Next. The redesign, booted by EXPO_PUBLIC_NEXT=1 (see index.ts).
@@ -56,6 +59,14 @@ function Root() {
   // creates a session, which would otherwise jump straight into the app before
   // the new password is chosen.
   const [resetting, setResetting] = useState<string | null>(null);
+  // Bumped when the reminders switch changes, so the scheduler re-reads it.
+  const [reminderVersion, setReminderVersion] = useState(0);
+  const streak = useStreak(auth.coupleId, auth.profile?.id ?? null);
+
+  // Channels and the notification permission, once per launch.
+  useEffect(() => {
+    if (auth.session) configureNext().catch(() => undefined);
+  }, [auth.session]);
 
   if (resetting !== null) {
     return <ResetScreen initialEmail={resetting} onDone={() => setResetting(null)} onCancel={() => setResetting(null)} />;
@@ -71,10 +82,16 @@ function Root() {
 
   return (
     <View style={styles.root}>
-      {tab === 'sky' && <SkyScreen {...common} />}
+      <Reminders
+        coupleId={auth.coupleId}
+        me={auth.profile.id}
+        partnerName={auth.partnerProfile?.display_name || 'Your partner'}
+        version={reminderVersion}
+      />
+      {tab === 'sky' && <SkyScreen {...common} streak={streak} />}
       {tab === 'us' && <UsScreen {...common} />}
       {tab === 'care' && <CareScreen {...common} />}
-      {tab === 'you' && <YouScreen {...common} signOut={auth.signOut} />}
+      {tab === 'you' && <YouScreen {...common} signOut={auth.signOut} onRemindersChanged={() => setReminderVersion((v) => v + 1)} />}
       <Dock tab={tab} onChange={setTab} bottom={insets.bottom} />
     </View>
   );

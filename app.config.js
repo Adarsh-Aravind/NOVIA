@@ -53,6 +53,13 @@ module.exports = ({ config }) => {
       pkg: 'com.iitznova.novia.next',
       stripped: PAYMENT_PERMISSIONS,
     });
+    // A bold status-bar icon (the old one was a hairline at 24dp) and the
+    // softer Ember accent in the notification header.
+    next.plugins = next.plugins.map((p) =>
+      Array.isArray(p) && p[0] === 'expo-notifications'
+        ? ['expo-notifications', { ...p[1], icon: './assets/next-notification-icon.png', color: '#FF8A3D' }]
+        : p
+    );
     // Home- and lock-screen widgets (src/next/widgets). 'keyguard' makes them
     // eligible for the lock screen where Android allows it (16 QPR2 and later).
     next.plugins.push([

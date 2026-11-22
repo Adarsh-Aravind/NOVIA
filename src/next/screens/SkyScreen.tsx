@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, useWindowDimensions, Vibration, View } from 'react-native';
+import { AppState, Pressable, StyleSheet, Text, useWindowDimensions, Vibration, View } from 'react-native';
 import Animated, {
   FadeIn,
   FadeOut,
@@ -13,7 +13,8 @@ import { useClock } from '@shopify/react-native-skia';
 import * as Haptics from 'expo-haptics';
 import { Footprints } from 'lucide-react-native';
 
-import { SkyCanvas, lightPositions, ORB_SCALE, SPIN_PER_MS, starXY } from '../sky/SkyCanvas';
+import { SkyCanvas, cometHead, lightPositions, ORB_SCALE, SPIN_PER_MS, starXY } from '../sky/SkyCanvas';
+import type { Streak } from '../hooks/useStreak';
 import { useConstellation, Star } from '../hooks/useConstellation';
 import { useTogether } from '../hooks/useTogether';
 import { useTilt } from '../hooks/useTilt';
@@ -25,12 +26,14 @@ import { daysUntilNext, occursOn, elapsedAt, formatElapsed } from '../../utils/m
 import type { Profile } from '../../types';
 import { C, F, R, MOODS, moodAdvice, moodLight, skyAt } from '../theme';
 import { saveWidgetState } from '../widgets/state';
+import { CH, notify } from '../notify/notify';
 
 interface Props {
   profile: Profile;
   partner: Profile | null;
   coupleId: string;
   bottomInset: number;
+  streak: Streak;
 }
 
 const KIND_WORD: Record<Star['kind'], string> = {
@@ -53,11 +56,23 @@ function greeting(h: number) {
   return 'Good night';
 }
 
+/** The streak, said plainly: how long, and what today still needs. */
+function streakLine(s: Streak, partnerName: string): string {
+  if (s.days === 0) {
+    if (s.meToday && !s.partnerToday) return `Streak starts when ${partnerName} opens NOVIA today`;
+    return 'Open NOVIA every day, both of you, to grow a comet';
+  }
+  const run = `Together ${s.days} ${s.days === 1 ? 'day' : 'days'} in a row`;
+  if (s.meToday && s.partnerToday) return run;
+  if (s.meToday) return `${run} · waiting for ${partnerName} today`;
+  return run;
+}
+
 function fmtDate(d: Date) {
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-export function SkyScreen({ profile, partner, coupleId, bottomInset }: Props) {
+export function SkyScreen({ profile, partner, coupleId, bottomInset, streak }: Props) {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const reduced = useReducedMotion();
@@ -142,6 +157,9 @@ export function SkyScreen({ profile, partner, coupleId, bottomInset }: Props) {
   useEffect(() => {
     if (together.nudgeCount === lastNudge.current) return;
     lastNudge.current = together.nudgeCount;
+    if (AppState.currentState !== 'active') {
+      notify({ channel: CH.partner, title: `${partnerName} is thinking of you`, body: 'Tap their light to send one back.', trigger: null, key: `nudge:${Date.now()}` }).catch(() => undefined);
+    }
     Vibration.vibrate([0, 30, 110, 30]);
     rippleFromMe.value = 0;
     ripple.value = 0;
@@ -184,6 +202,14 @@ export function SkyScreen({ profile, partner, coupleId, bottomInset }: Props) {
   // Tap a star to see what it was.
   const [tip, setTip] = useState<{ star: Star; x: number; y: number } | null>(null);
   const tapSky = (x: number, y: number) => {
+    const head = cometHead(width, height);
+    if (streak.days > 0 && Math.hypot(head.x - x, head.y - y) < 34) {
+      Haptics.selectionAsync();
+      showToast(
+        `Together ${streak.days} ${streak.days === 1 ? 'day' : 'days'} in a row${streak.best > streak.days ? ` · best ${streak.best}` : ''}`
+      );
+      return;
+    }
     const rot = clock.value * SPIN_PER_MS;
     const cos = Math.cos(rot);
     const sin = Math.sin(rot);
@@ -254,6 +280,7 @@ export function SkyScreen({ profile, partner, coupleId, bottomInset }: Props) {
         me={moodLight(currentMood)}
         partner={partnerLight}
         partnerAway={!together.partnerHere}
+        streakDays={streak.days}
       />
 
       <Pressable style={StyleSheet.absoluteFill} onPress={(e) => tapSky(e.nativeEvent.locationX, e.nativeEvent.locationY)} />
@@ -309,9 +336,8 @@ export function SkyScreen({ profile, partner, coupleId, bottomInset }: Props) {
       <Animated.View pointerEvents="none" style={[styles.status, { top: cy + width * 0.26 }, labelsStyle]}>
         <Text style={styles.statusText}>{status}</Text>
         <Text style={styles.statusHint}>
-          {stars.length > 0
-            ? `${stars.length} stars in your sky${first ? ` since ${fmtDate(first)}` : ''}`
-            : 'Every note, plan and milestone becomes a star here'}
+          {streakLine(streak, partnerName)}
+          {stars.length > 0 ? ` · ${stars.length} stars` : ''}
         </Text>
       </Animated.View>
       {merged && (

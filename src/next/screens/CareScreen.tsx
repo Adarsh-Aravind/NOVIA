@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Page, Card, Label, Empty, ui } from '../components/ui';
 import { WalkTogether } from '../walk/WalkTogether';
+import { WeatherOfUs } from '../weather/WeatherOfUs';
 import { usePeriods } from '../../hooks/usePeriods';
 import { parseLocalDate } from '../../utils/dateUtils';
 import { useSteps } from '../../hooks/useSteps';
@@ -31,6 +32,7 @@ export function CareScreen({ profile, partner, coupleId, bottomInset }: Props) {
 
   return (
     <Page kicker="Looking after each other" title="Care" bottomInset={bottomInset}>
+      <WeatherOfUs coupleId={coupleId} me={profile.id} partnerName={partner?.display_name || 'Partner'} />
       <WalkTogether coupleId={coupleId} me={profile.id} />
       <Card>
         <Label>Cycle</Label>
