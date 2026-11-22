@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../services/supabase';
+import { useChannelSuffix } from '../../services/realtime';
 import { toLocalISODate } from '../../utils/dateUtils';
 import { along, distanceKm, Place } from './places';
 
@@ -35,6 +36,8 @@ const FALLBACK_DAILY = 8000;
  * a season for the two of you.
  */
 export function useJourney(coupleId: string | null, userId: string | null) {
+  // Per-instance name: see services/realtime.ts.
+  const channelSuffix = useChannelSuffix();
   const [journey, setJourney] = useState<Journey | null>(null);
   const [walked, setWalked] = useState(0);
   const [avgDaily, setAvgDaily] = useState(FALLBACK_DAILY);
@@ -65,7 +68,7 @@ export function useJourney(coupleId: string | null, userId: string | null) {
     if (!coupleId) return;
     load();
     const ch = supabase
-      .channel(`next-journey:${coupleId}`)
+      .channel(`next-journey:${coupleId}:${channelSuffix}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'journeys', filter: `couple_id=eq.${coupleId}` }, load)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'step_counts', filter: `couple_id=eq.${coupleId}` }, load)
       .subscribe();

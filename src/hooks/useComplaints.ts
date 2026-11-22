@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../services/supabase';
+import { useChannelSuffix } from '../services/realtime';
 import { Complaint, ComplaintReply } from '../types';
 
 export function useComplaints(coupleId: string | null, userId: string | null) {
+  // Per-instance name: see services/realtime.ts.
+  const channelSuffix = useChannelSuffix();
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [replies, setReplies] = useState<ComplaintReply[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -49,7 +52,7 @@ export function useComplaints(coupleId: string | null, userId: string | null) {
     Promise.all([fetchComplaints(), fetchReplies()]).finally(() => setLoading(false));
 
     const channel = supabase
-      .channel(`complaints-sync:${coupleId}`)
+      .channel(`complaints-sync:${coupleId}:${channelSuffix}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'complaints', filter: `couple_id=eq.${coupleId}` },

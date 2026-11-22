@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../services/supabase';
+import { useChannelSuffix } from '../services/realtime';
 import { PeriodRecord } from '../types';
 import { calculateCyclePredictions, CyclePrediction } from '../utils/cycleMath';
 
 export function usePeriods(coupleId: string | null) {
+  // Per-instance name: see services/realtime.ts.
+  const channelSuffix = useChannelSuffix();
   const [records, setRecords] = useState<PeriodRecord[]>([]);
   const [predictions, setPredictions] = useState<CyclePrediction | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -45,7 +48,7 @@ export function usePeriods(coupleId: string | null) {
 
     // Listen for realtime cycles table updates
     const channel = supabase
-      .channel(`periods-sync:${coupleId}`)
+      .channel(`periods-sync:${coupleId}:${channelSuffix}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'periods', filter: `couple_id=eq.${coupleId}` },

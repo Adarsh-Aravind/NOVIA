@@ -4,6 +4,7 @@ import { Press } from '../components/Press';
 import { ChevronLeft, ChevronRight, Sun, CloudSun, Cloud, CloudDrizzle, CloudRain, CloudLightning, Moon } from 'lucide-react-native';
 import { Card, Label, ui } from '../components/ui';
 import { supabase } from '../../services/supabase';
+import { useChannelSuffix } from '../../services/realtime';
 import { toLocalISODate } from '../../utils/dateUtils';
 import { C, F } from '../theme';
 
@@ -63,6 +64,8 @@ function shift(iso: string, delta: number): string {
 }
 
 export function WeatherOfUs({ coupleId, me, partnerName }: { coupleId: string; me: string; partnerName: string }) {
+  // Per-instance name: see services/realtime.ts.
+  const channelSuffix = useChannelSuffix();
   // Map of 'YYYY-MM-DD' -> weather, per person. Later entries in a day win.
   const [mine, setMine] = useState<Map<string, Kind>>(new Map());
   const [theirs, setTheirs] = useState<Map<string, Kind>>(new Map());
@@ -92,7 +95,7 @@ export function WeatherOfUs({ coupleId, me, partnerName }: { coupleId: string; m
   useEffect(() => {
     load();
     const ch = supabase
-      .channel(`next-weather:${coupleId}`)
+      .channel(`next-weather:${coupleId}:${channelSuffix}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'mood_logs', filter: `couple_id=eq.${coupleId}` }, load)
       .subscribe();
     return () => {

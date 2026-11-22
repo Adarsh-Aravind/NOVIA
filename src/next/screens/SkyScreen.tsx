@@ -264,15 +264,17 @@ export function SkyScreen({ profile, partner, coupleId, bottomInset, streak }: P
     opacity: extraH.value > 0 ? 1 : 0,
   }));
 
-  // Touch targets ride on the lights.
-  const meStyle = useAnimatedStyle(() => {
+  // What a touch at (x, y) landed on, using where the lights are this instant.
+  const touched = useRef<'me' | 'partner' | 'sky'>('sky');
+  const whatIsAt = (x: number, y: number): 'me' | 'partner' | 'sky' => {
     const p = lightPositions(clock.value, sep.value, width, cx, cy);
-    return { transform: [{ translateX: p.ax - orbR * 1.4 }, { translateY: p.ay - orbR * 1.4 }] };
-  });
-  const paStyle = useAnimatedStyle(() => {
-    const p = lightPositions(clock.value, sep.value, width, cx, cy);
-    return { transform: [{ translateX: p.bx - orbR * 1.4 }, { translateY: p.by - orbR * 1.4 }] };
-  });
+    const reach = orbR * 1.5;
+    const dMe = Math.hypot(x - p.ax, y - p.ay);
+    const dPa = Math.hypot(x - p.bx, y - p.by);
+    if (dMe < reach && dMe <= dPa) return 'me';
+    if (dPa < reach) return 'partner';
+    return 'sky';
+  };
   const labelsStyle = useAnimatedStyle(() => ({ opacity: 1 - merge.value }));
 
   // Tap a star to see what it was.
@@ -359,7 +361,30 @@ export function SkyScreen({ profile, partner, coupleId, bottomInset, streak }: P
         streakDays={streak.days}
       />
 
-      <Pressable style={StyleSheet.absoluteFill} onPress={(e) => tapSky(e.nativeEvent.locationX, e.nativeEvent.locationY)} />
+      {/* One touch surface for the whole sky. It works out what was touched
+          from where the lights are right now, rather than moving two touch
+          targets along with the lights every frame: on this React Native
+          setup that forced a full view update per frame, and measured idle
+          frames went from smooth to about 47 fps. */}
+      <Pressable
+        style={StyleSheet.absoluteFill}
+        delayLongPress={220}
+        onPressIn={(e) => {
+          touched.current = whatIsAt(e.nativeEvent.locationX, e.nativeEvent.locationY);
+          if (touched.current === 'me') pressLight();
+        }}
+        onLongPress={() => touched.current === 'me' && startHold()}
+        onPressOut={() => touched.current === 'me' && endHold()}
+        onPress={(e) => {
+          if (touched.current === 'partner') nudge();
+          else if (touched.current === 'me') showToast(`Press and hold your light. If ${partnerName} holds theirs too, they meet.`);
+          else tapSky(e.nativeEvent.locationX, e.nativeEvent.locationY);
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={`Your sky. Hold your light to reach for ${partnerName}; tap theirs to nudge them.`}
+        accessibilityActions={[{ name: 'nudge', label: `Nudge ${partnerName}` }]}
+        onAccessibilityAction={(ev) => ev.nativeEvent.actionName === 'nudge' && nudge()}
+      />
 
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 14 }]} pointerEvents="box-none">
@@ -387,28 +412,6 @@ export function SkyScreen({ profile, partner, coupleId, bottomInset, streak }: P
           </View>
         ) : null}
       </View>
-
-      {/* Lights: hold yours, tap theirs */}
-      <Animated.View style={[styles.orbHit, { width: orbR * 2.8, height: orbR * 2.8 }, meStyle]}>
-        <Pressable
-          style={styles.fill}
-          delayLongPress={220}
-          onPressIn={pressLight}
-          onLongPress={startHold}
-          onPressOut={endHold}
-          onPress={() => showToast(`Press and hold your light. If ${partnerName} holds theirs too, they meet.`)}
-          accessibilityRole="button"
-          accessibilityLabel="Your light. Press and hold to reach for your partner."
-        />
-      </Animated.View>
-      <Animated.View style={[styles.orbHit, { width: orbR * 2.8, height: orbR * 2.8 }, paStyle]}>
-        <Pressable
-          style={styles.fill}
-          onPress={nudge}
-          accessibilityRole="button"
-          accessibilityLabel={`${partnerName}'s light. Tap to let them know you're thinking of them.`}
-        />
-      </Animated.View>
 
       <Animated.View pointerEvents="none" style={[styles.status, { top: cy + width * 0.26 }, labelsStyle]}>
         <Text style={styles.statusText}>{status}</Text>
@@ -575,7 +578,6 @@ const styles = StyleSheet.create({
   },
   chipHot: { backgroundColor: 'rgba(255,243,224,0.14)', borderColor: 'rgba(255,243,224,0.4)' },
   chipText: { fontFamily: F.medium, fontSize: 13, color: C.ink },
-  orbHit: { position: 'absolute', left: 0, top: 0, borderRadius: 999 },
   status: { position: 'absolute', left: 24, right: 24, alignItems: 'center', gap: 4 },
   statusText: { fontFamily: F.displayMed, fontSize: 17, color: C.ink, textAlign: 'center' },
   statusHint: { fontFamily: F.body, fontSize: 12.5, color: C.inkSoft, textAlign: 'center' },

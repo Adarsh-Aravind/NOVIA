@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../services/supabase';
+import { useChannelSuffix } from '../services/realtime';
 import { Todo, TodoRecurrence } from '../types';
 
 export function useTodos(coupleId: string | null, userId: string | null) {
+  // Per-instance name: see services/realtime.ts.
+  const channelSuffix = useChannelSuffix();
   const [todos, setTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -32,7 +35,7 @@ export function useTodos(coupleId: string | null, userId: string | null) {
     fetchTodos().finally(() => setLoading(false));
 
     const channel = supabase
-      .channel(`todos-sync:${coupleId}`)
+      .channel(`todos-sync:${coupleId}:${channelSuffix}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'todos', filter: `couple_id=eq.${coupleId}` },

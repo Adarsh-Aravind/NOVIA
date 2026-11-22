@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../services/supabase';
+import { useChannelSuffix } from '../services/realtime';
 import { Profile } from '../types';
 import { Alert } from 'react-native';
 
@@ -17,6 +18,8 @@ function normalizeProfile(row: Profile): Profile {
 }
 
 export function useAuth() {
+  // Per-instance name: see services/realtime.ts.
+  const channelSuffix = useChannelSuffix();
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -107,7 +110,7 @@ export function useAuth() {
     if (!session) return;
 
     const profileChannel = supabase
-      .channel(`profile-self:${session.user.id}`)
+      .channel(`profile-self:${session.user.id}:${channelSuffix}`)
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${session.user.id}` },

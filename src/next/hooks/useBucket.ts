@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../../services/supabase';
+import { useChannelSuffix } from '../../services/realtime';
 
 export interface BucketItem {
   id: string;
@@ -14,6 +15,8 @@ export interface BucketItem {
 
 /** The shared bucket list, live. Same table and writes as the current app. */
 export function useBucket(coupleId: string | null, userId: string | null) {
+  // Per-instance name: see services/realtime.ts.
+  const channelSuffix = useChannelSuffix();
   const [items, setItems] = useState<BucketItem[]>([]);
 
   const load = useCallback(async () => {
@@ -30,7 +33,7 @@ export function useBucket(coupleId: string | null, userId: string | null) {
     if (!coupleId) return;
     load();
     const ch = supabase
-      .channel(`next-bucket:${coupleId}`)
+      .channel(`next-bucket:${coupleId}:${channelSuffix}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bucket_list', filter: `couple_id=eq.${coupleId}` }, load)
       .subscribe();
     return () => {

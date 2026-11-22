@@ -28,8 +28,10 @@ export const C = {
   partnerSoft: 'rgba(185,168,255,0.16)',
   star: '#FFF3E0',
 
-  glass: 'rgba(16,13,34,0.72)',
-  glassHi: 'rgba(28,23,56,0.82)',
+  // Panels are solid: text over translucent layers was hard to read.
+  panel: '#16122B',
+  glass: 'rgba(14,11,31,0.96)',
+  glassHi: 'rgba(26,21,52,0.97)',
   danger: '#FF6B6B',
 } as const;
 

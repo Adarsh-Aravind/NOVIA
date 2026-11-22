@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../services/supabase';
+import { useChannelSuffix } from '../services/realtime';
 import { Milestone, MilestoneRecurrence } from '../types';
 
 /**
@@ -10,6 +11,8 @@ import { Milestone, MilestoneRecurrence } from '../types';
  * get the "On this day" heads-up.
  */
 export function useMilestones(coupleId: string | null, userId: string | null) {
+  // Per-instance name: see services/realtime.ts.
+  const channelSuffix = useChannelSuffix();
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -39,7 +42,7 @@ export function useMilestones(coupleId: string | null, userId: string | null) {
     fetchMilestones().finally(() => setLoading(false));
 
     const channel = supabase
-      .channel(`milestones-sync:${coupleId}`)
+      .channel(`milestones-sync:${coupleId}:${channelSuffix}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'milestones', filter: `couple_id=eq.${coupleId}` },

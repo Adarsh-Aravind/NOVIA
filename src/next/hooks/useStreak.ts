@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AppState } from 'react-native';
 import { supabase } from '../../services/supabase';
+import { useChannelSuffix } from '../../services/realtime';
 import { toLocalISODate } from '../../utils/dateUtils';
 
 export interface Streak {
@@ -29,6 +30,8 @@ function shift(iso: string, delta: number): string {
  * it still stands this morning, waiting for today to be claimed.
  */
 export function useStreak(coupleId: string | null, me: string | null): Streak {
+  // Per-instance name: see services/realtime.ts.
+  const channelSuffix = useChannelSuffix();
   const [streak, setStreak] = useState<Streak>(EMPTY);
 
   const load = useCallback(async () => {
@@ -71,7 +74,7 @@ export function useStreak(coupleId: string | null, me: string | null): Streak {
     checkIn();
     const sub = AppState.addEventListener('change', (s) => s === 'active' && checkIn());
     const ch = supabase
-      .channel(`next-streak:${coupleId}`)
+      .channel(`next-streak:${coupleId}:${channelSuffix}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'together_days', filter: `couple_id=eq.${coupleId}` }, load)
       .subscribe();
     return () => {

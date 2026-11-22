@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../services/supabase';
+import { openSharedChannel } from '../services/realtime';
 import { StepCount, StepForfeit } from '../types';
 import { IS_DEMO } from '../demo/config';
 import { demoTodaySteps } from '../demo/seed';
@@ -497,8 +498,14 @@ export function useSteps(
     // event — which is exactly how this shipped. The broadcasts ride the same
     // socket and need no server-side setup, so the duel stays live either way
     // (mirrors [[useRealtimeNotes]]).
-    const channel = supabase
-      .channel(`steps-sync:${coupleId}`)
+    // The topic is shared with the partner's phone (the broadcasts), so it
+    // opens once any leftover channel on it has closed (services/realtime.ts),
+    // and the first load() waits for it so its write has a channel to
+    // announce on.
+    let disposed = false;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    openSharedChannel(`steps-sync:${coupleId}`, (ch) => {
+    channel = ch
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'step_counts', filter: `couple_id=eq.${coupleId}` },
@@ -535,8 +542,9 @@ export function useSteps(
         }
       });
     channelRef.current = channel;
-
-    load();
+    }, () => !disposed).then(() => {
+      if (!disposed) load();
+    });
 
     // Refresh on foreground — Google Fit → Health Connect sync lags, and the
     // partner may have synced while we were backgrounded.
@@ -555,8 +563,9 @@ export function useSteps(
       mounted.current = false;
       clearInterval(timer);
       appStateSub.remove();
+      disposed = true;
       channelRef.current = null;
-      supabase.removeChannel(channel);
+      if (channel) supabase.removeChannel(channel);
     };
   }, [coupleId, load, fetchSeason, fetchForfeit]);
 

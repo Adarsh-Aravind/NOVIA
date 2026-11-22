@@ -11,6 +11,7 @@ import {
   type CapturedNotification,
 } from '../../modules/notification-listener';
 import { supabase } from '../services/supabase';
+import { useChannelSuffix } from '../services/realtime';
 import { parsePayment } from '../utils/paymentParser';
 import { Transaction } from '../types';
 import { IS_DEMO } from '../demo/config';
@@ -89,6 +90,8 @@ export function useTransactions(
   coupleId: string | null,
   partnerAliases: string[]
 ): TransactionsState {
+  // Per-instance name: see services/realtime.ts.
+  const channelSuffix = useChannelSuffix();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [permitted, setPermitted] = useState(false);
@@ -325,7 +328,7 @@ export function useTransactions(
     fetchTransactions();
 
     channelRef.current = supabase
-      .channel(`transactions-sync:${coupleId}`)
+      .channel(`transactions-sync:${coupleId}:${channelSuffix}`)
       .on(
         'postgres_changes',
         {

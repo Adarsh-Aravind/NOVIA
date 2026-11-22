@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { Alert } from 'react-native';
 import { supabase } from '../services/supabase';
+import { openSharedChannel } from '../services/realtime';
 import { SharedNote } from '../types';
 
 /** Don't re-broadcast "still typing" more often than this. */
@@ -43,9 +44,12 @@ export function useRealtimeNotes(coupleId: string | null, userId: string | null)
 
     fetchNotes();
 
-    // 2. Setup channel for broadcasts and Postgres change listeners
-    channelRef.current = supabase
-      .channel(`notes-sync:${coupleId}`)
+    // 2. Setup channel for broadcasts and Postgres change listeners. The
+    // topic is shared with the partner's phone (typing, notes_updated), so it
+    // opens once any leftover channel on it has closed (services/realtime.ts).
+    let disposed = false;
+    openSharedChannel(`notes-sync:${coupleId}`, (channel) => {
+    channelRef.current = channel
       .on(
         'postgres_changes',
         {
@@ -69,11 +73,14 @@ export function useRealtimeNotes(coupleId: string | null, userId: string | null)
         fetchNotes();
       })
       .subscribe();
+    }, () => !disposed);
 
     return () => {
+      disposed = true;
       if (typingExpiry.current) clearTimeout(typingExpiry.current);
       setIsPartnerTyping(false);
       if (channelRef.current) supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
     };
   }, [coupleId, userId]);
 

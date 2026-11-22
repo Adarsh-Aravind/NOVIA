@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../services/supabase';
+import { openSharedChannel } from '../services/realtime';
 
 export function useMood(coupleId: string | null, userId: string | null, initialPartnerMood = 'Neutral') {
   const [currentMood, setCurrentMood] = useState<string>('Neutral');
@@ -39,18 +40,26 @@ export function useMood(coupleId: string | null, userId: string | null, initialP
 
     fetchMoods();
 
-    // Setup broadcast event listener
-    channelRef.current = supabase
-      .channel(`mood-sync:${coupleId}`, {
-        config: { broadcast: { self: false } },
-      })
-      .on('broadcast', { event: 'mood_update' }, ({ payload }) => {
-        setPartnerMood(payload.mood);
-      })
-      .subscribe();
+    // Broadcast listener on a topic shared with the partner's phone; opened
+    // once any leftover channel on it has closed (services/realtime.ts).
+    let disposed = false;
+    openSharedChannel(
+      `mood-sync:${coupleId}`,
+      (channel) => {
+        channelRef.current = channel
+          .on('broadcast', { event: 'mood_update' }, ({ payload }) => {
+            setPartnerMood(payload.mood);
+          })
+          .subscribe();
+      },
+      () => !disposed,
+      { config: { broadcast: { self: false } } }
+    );
 
     return () => {
+      disposed = true;
       if (channelRef.current) supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
     };
   }, [coupleId, userId]);
 

@@ -2,8 +2,6 @@ import React from 'react';
 import { StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
-import { BlurView } from 'expo-blur';
-import Svg, { Defs, LinearGradient as SvgGradient, Rect, Stop } from 'react-native-svg';
 import { Backdrop } from './Backdrop';
 import { Press } from './Press';
 import { C, F, R } from '../theme';
@@ -48,38 +46,14 @@ export function Page({
 }
 
 /**
- * Milky frosted glass. A real blur of whatever is behind the card (Android's
- * blur through expo-blur), a white frost over it, a bright top rim where the
- * light catches the edge, and a soft shadow underneath to lift it off the
- * page. The blur keeps refreshing as you scroll, so the backdrop smears past
- * behind the glass.
+ * A card: a solid deep-indigo panel with a fine border and a slightly brighter
+ * top edge. It was frosted glass for a while; that was hard to read over the
+ * moving backdrop, and Android's live blur re-blurred the screen behind every
+ * card on every frame (measured: about 40% slow frames while scrolling). Solid
+ * panels read clearly and cost nothing.
  */
 export function Card({ children, style }: { children: React.ReactNode; style?: ViewStyle }) {
-  // The outer view does the rounding and clipping (Android clips a plain
-  // view to its radius reliably; the native blur view on its own doesn't).
-  return (
-    <View style={[styles.card, style]}>
-      <BlurView
-        pointerEvents="none"
-        intensity={50}
-        tint="default"
-        blurReductionFactor={2.5}
-        experimentalBlurMethod="dimezisBlurView"
-        style={StyleSheet.absoluteFill}
-      />
-      <Svg pointerEvents="none" style={StyleSheet.absoluteFill} preserveAspectRatio="none" viewBox="0 0 100 100">
-        <Defs>
-          <SvgGradient id="sheen" x1="0" y1="0" x2="0.35" y2="1">
-            <Stop offset="0" stopColor="#FFFFFF" stopOpacity="0.16" />
-            <Stop offset="0.4" stopColor="#FFFFFF" stopOpacity="0.04" />
-            <Stop offset="1" stopColor="#FFFFFF" stopOpacity="0" />
-          </SvgGradient>
-        </Defs>
-        <Rect x="0" y="0" width="100" height="100" fill="url(#sheen)" />
-      </Svg>
-      {children}
-    </View>
-  );
+  return <View style={[styles.card, style]}>{children}</View>;
 }
 
 export function Label({ children }: { children: React.ReactNode }) {
@@ -153,13 +127,10 @@ const styles = StyleSheet.create({
   card: {
     padding: 16,
     borderRadius: R.lg,
-    overflow: 'hidden',
-    // A whisper of white even before the blur draws, so a phone without blur
-    // still gets frosted panes rather than holes.
-    backgroundColor: 'rgba(255,255,255,0.07)',
+    backgroundColor: C.panel,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
-    borderTopColor: 'rgba(255,255,255,0.38)',
+    borderColor: C.line,
+    borderTopColor: C.lineStrong,
     gap: 10,
   },
   label: { fontFamily: F.semibold, fontSize: 11, letterSpacing: 1.2, textTransform: 'uppercase', color: C.inkFaint },
